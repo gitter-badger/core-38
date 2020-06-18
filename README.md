@@ -5,7 +5,7 @@
 </a>
 
 [![Maven Central with version prefix filter](https://img.shields.io/maven-central/v/org.burningwave/core/5)](https://search.maven.org/artifact/org.burningwave/core/5.45.2/jar)
-[![GitHub](https://img.shields.io/github/license/burningwave/core)](https://github.com/burningwave/core/blob/master/LICENSE)
+[![GitHub](https://img.shields.io/github/license/burningwave/core)](https://github.com/burningwave/core/blob/version_5/LICENSE)
 
 [![Platforms](https://img.shields.io/badge/platforms-Windows%2C%20Max%20OS%2C%20Linux-orange)](https://github.com/burningwave/core/actions/runs/139987525)
 
