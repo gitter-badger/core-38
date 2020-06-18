@@ -360,6 +360,143 @@ public class Finder {
 
 <br/>
 
+# How to scan file system paths and apply a filter and a lambda to all filtered elements
+
+This task can be accomplished by using the **FileSystemScanner**, a component that **is able to perform a recursive search both in the folders and in the compressed archives (zip, ear, jar, war, jmod) of the file system**. For using the FileSystemScanner you must extends the **FileScanConfig** and override the methods **getFileNameCheckerForFileSystemEntry** and **getFileNameCheckerForZipEntry** if you want to use a filter based on file name check (in this case you must call the **checkFileOptions** method with **FileScanConfigAbst.CHECK_FILE_NAME** parameter), or override the methods **getFileSignatureCheckerForFileSystemEntry** and **getFileSignatureCheckerForZipEntry** if you want to use a filter based on file signature check (in this case you must call the **checkFileOptions** method with **FileScanConfigAbst.CHECK_FILE_SIGNATURE** parameter) and than call the method **toScanConfiguration** with the lambda that will be applied to all filtered items and pass the generated **Configuration** to **scan** method of FileSystemScanner. In this example we are searching for all class files by file extension, collect them and store them to another path:
+```java
+package org.burningwave.core.examples.filesystemscanner;
+
+import java.io.File;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.function.Predicate;
+
+import org.burningwave.core.assembler.ComponentContainer;
+import org.burningwave.core.assembler.ComponentSupplier;
+import org.burningwave.core.classes.JavaClass;
+import org.burningwave.core.io.FileScanConfig;
+import org.burningwave.core.io.FileScanConfigAbst;
+import org.burningwave.core.io.FileSystemItem;
+import org.burningwave.core.io.IterableZipContainer.Entry;
+
+public class ClassFileScanner {
+    
+    public static void execute() {
+        ComponentSupplier componentSupplier = ComponentContainer.getInstance();
+        Collection<FileSystemItem> files = new HashSet<>();
+        componentSupplier.getFileSystemScanner().scan(
+            new FileScanConfig() {
+                @Override
+                protected Predicate<File> getFileNameCheckerForFileSystemEntry() {
+                    return entry -> {
+                        String name = entry.getName();
+                        return name.endsWith(".class") && 
+                            !name.endsWith("module-info.class") &&
+                            !name.endsWith("package-info.class");
+                    };
+                }
+                
+                @Override
+                protected Predicate<Entry> getFileNameCheckerForZipEntry() {
+                    return entry -> {
+                        String name = entry.getName();
+                        return name.endsWith(".class") && 
+                            !name.endsWith("module-info.class") &&
+                            !name.endsWith("package-info.class");
+                    };
+                }
+                
+            }.checkFileOptions(
+                FileScanConfigAbst.CHECK_FILE_NAME
+            ).addPaths(
+                componentSupplier.getPathHelper().getMainClassPaths()
+            ).toScanConfiguration(
+                (wrapper) -> {
+                    FileSystemItem fIS = wrapper.getScannedItem().toFileSystemItem();
+                    System.out.println(fIS.getAbsolutePath());
+                    files.add(fIS);
+                    JavaClass.create(
+                        wrapper.getScannedItem().toByteBuffer()
+                    ).storeToClassPath(
+                        System.getProperty("user.home") + "/Desktop/bw-tests"
+                    );
+                }
+            )
+        );
+        System.out.println("Files found: " + files.size());
+    }    
+    
+    public static void main(String[] args) throws Throwable {
+        execute();
+    }
+    
+}
+```
+
+In this example we are searching for all class files by file signature, collect them and store them to another path:
+```java
+package org.burningwave.core.examples.filesystemscanner;
+
+import static org.burningwave.core.assembler.StaticComponentContainer.Streams;
+
+import java.io.File;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.function.Predicate;
+
+import org.burningwave.core.assembler.ComponentContainer;
+import org.burningwave.core.assembler.ComponentSupplier;
+import org.burningwave.core.classes.JavaClass;
+import org.burningwave.core.function.ThrowingSupplier;
+import org.burningwave.core.io.FileScanConfig;
+import org.burningwave.core.io.FileScanConfigAbst;
+import org.burningwave.core.io.FileSystemItem;
+import org.burningwave.core.io.IterableZipContainer.Entry;
+
+public class ClassFileScannerBasedOnFileSignature {
+    
+    public static void execute() {
+        ComponentSupplier componentSupplier = ComponentContainer.getInstance();
+        Collection<FileSystemItem> files = new HashSet<>();
+        componentSupplier.getFileSystemScanner().scan(
+            new FileScanConfig() {
+                @Override
+                protected Predicate<File> getFileSignatureCheckerForFileSystemEntry() {
+                    return entry -> ThrowingSupplier.get(() -> Streams.isClass(entry));
+                }
+                
+                @Override
+                protected Predicate<Entry> getFileSignatureCheckerForZipEntry() {
+                	return entry -> ThrowingSupplier.get(() -> Streams.isClass(entry.toByteBuffer()));
+                }
+                
+            }.checkFileOptions(
+                FileScanConfigAbst.CHECK_FILE_SIGNATURE
+            ).addPaths(
+                componentSupplier.getPathHelper().getMainClassPaths()
+            ).toScanConfiguration(
+                (wrapper) -> {
+                    FileSystemItem fIS = wrapper.getScannedItem().toFileSystemItem();
+                    System.out.println(fIS.getAbsolutePath());
+                    files.add(fIS);
+                    JavaClass.create(
+                        wrapper.getScannedItem().toByteBuffer()
+                    ).storeToClassPath(
+                        System.getProperty("user.home") + "/Desktop/bw-tests"
+                    );
+                }
+            )
+        );
+        System.out.println("Files found: " + files.size());
+    }    
+    
+    public static void main(String[] args) throws Throwable {
+        execute();
+    }
+    
+}
+```
+
 # Reaching a resource of the file system
 Through **FileSystemItem** you can reach a resource of the file system even if it is contained in a nested supported (**zip, jar, war, ear, jmod**) compressed archive and obtain the content of it or other informations such as if it is a folder or a file or a compressed archive or if it is a compressed entry or obtain, if it is a folder or a compressed archive, the direct children or all nested children or a filtered collection of them. You can retrieve a FileSystemItem through an absolute path or through a relative path referred to your classpath by using the PathHelper. FileSystemItems are cached and **there will only be one instance of them for an absolute path** and you can also clear the cache e reload all informations of a FileSystemItem. In the example below we show how to retrieve and use a FileSystemItem.
 
