@@ -24,7 +24,7 @@ And now we will see:
 * [**executing stringified source code**](#Executing-stringified-source-code)
 * [**retrieving classes of runtime class paths or of other paths through the ClassHunter**](#Retrieving-classes-of-runtime-class-paths-or-of-other-paths-through-the-ClassHunter)
 * [**reaching a resource of the file system**](#Reaching-a-resource-of-the-file-system)
-* [**How to scan file system paths and apply a filter and a lambda to all filtered elements**](#How-to-scan-file-system-paths-and-apply-a-filter-and-a-lambda-to-all-filtered-elements)
+* [**how to scan file system paths and apply a filter and a lambda to all filtered elements**](#How-to-scan-file-system-paths-and-apply-a-filter-and-a-lambda-to-all-filtered-elements)
 * [**architectural overview and configuration**](#Architectural-overview-and-configuration)
 * [**other examples of using some components**](#Other-examples-of-using-some-components)
 
@@ -873,16 +873,6 @@ paths.class-factory.default-class-loader.additional-class-repositories=C:/some p
 		<li>
 			<a href="https://github.com/burningwave/core/wiki/Reaching-a-resource-of-the-file-system">
 			<b>USE CASE</b>: Reaching a resource of the file system
-			</a>
-		</li>
-	</ul>
-</details>
-<details open>
-	<summary><b>FileSystemScanner</b></summary>
-	<ul>
-		<li>
-			<a href="https://github.com/burningwave/core/wiki/How-to-scan-file-system-paths,-apply-a-filter-and-a-lamda-to-all-filtered-elements">
-			<b>USE CASE</b>: how to scan file system paths, apply a filter and a lamda to all filtered elements
 			</a>
 		</li>
 	</ul>
