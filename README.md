@@ -7,9 +7,9 @@
 [![Maven Central with version prefix filter](https://img.shields.io/maven-central/v/org.burningwave/core/5)](https://search.maven.org/artifact/org.burningwave/core/5.45.2/jar)
 [![GitHub](https://img.shields.io/github/license/burningwave/core)](https://github.com/burningwave/core/blob/master/LICENSE)
 
-[![Platforms](https://img.shields.io/badge/platforms-Windows%2C%20Max%20OS%2C%20Linux-orange)](https://github.com/burningwave/core/actions/runs/124781604)
+[![Platforms](https://img.shields.io/badge/platforms-Windows%2C%20Max%20OS%2C%20Linux-orange)](https://github.com/burningwave/core/actions/runs/139987525)
 
-[![Supported JVM](https://img.shields.io/badge/supported%20JVM-8%2C%209%2C%2010%2C%2011%2C%2012%2C%2013%2C%2014%2C%2015ea-blueviolet)](https://github.com/burningwave/core/actions/runs/124781604)
+[![Supported JVM](https://img.shields.io/badge/supported%20JVM-8%2C%209%2C%2010%2C%2011%2C%2012%2C%2013%2C%2014%2C%2015ea-blueviolet)](https://github.com/burningwave/core/actions/runs/139987525)
 
 [![Coverage Status](https://coveralls.io/repos/github/burningwave/core/badge.svg?branch=version_5)](https://coveralls.io/github/burningwave/core?branch=version_5)
 [![GitHub issues](https://img.shields.io/github/issues/burningwave/core)](https://github.com/burningwave/core/issues)
