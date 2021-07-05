@@ -33,6 +33,10 @@ import java.util.Collection;
 import java.util.Optional;
 
 public class AnnotationSourceGenerator extends SourceGenerator.Abst {
+
+	private static final long serialVersionUID = -6466348844734237149L;
+	
+	
 	private TypeDeclarationSourceGenerator type;
 	private String name;
 	private BodySourceGenerator body;
@@ -72,18 +76,20 @@ public class AnnotationSourceGenerator extends SourceGenerator.Abst {
 	}
 	
 	public AnnotationSourceGenerator addParameter(String name, boolean isArray, VariableSourceGenerator... parameters) {
-		this.body = Optional.ofNullable(this.body).orElseGet(() ->
-			BodySourceGenerator.createSimple().setDelimiters("(", ")").setBodyElementSeparator(", ")
+		Optional.ofNullable(this.body).orElseGet(() ->
+			this.body =BodySourceGenerator.createSimple().setDelimiters("(\n", "\n)").setBodyElementSeparator(",\n").setElementPrefix("\t")
 		);
-		BodySourceGenerator innBody = BodySourceGenerator.createSimple().setBodyElementSeparator(", ");
+		BodySourceGenerator innBody = BodySourceGenerator.createSimple().setBodyElementSeparator(",\n").setElementPrefix("\t");
 		if (name != null) {
 			if (isArray) {
-				innBody.setDelimiters(name + " = {", "}");
+				innBody.setDelimiters(name + " = {\n", "\n}");
 			} else {
 				innBody.setDelimiters(name + " = ", null);
 			}
 		} else if (isArray) {
 			innBody.setDelimiters("{", "}");
+		} else {
+			innBody.setElementPrefix(null);
 		}
 		for (VariableSourceGenerator parameter : parameters) {
 			innBody.addElement(parameter.setDelimiter(null));
@@ -105,18 +111,20 @@ public class AnnotationSourceGenerator extends SourceGenerator.Abst {
 	}
 	
 	public AnnotationSourceGenerator addParameter(String name, boolean isArray, AnnotationSourceGenerator... parameters) {
-		this.body = Optional.ofNullable(this.body).orElseGet(() ->
-			BodySourceGenerator.createSimple().setDelimiters("(", ")").setBodyElementSeparator(", ")
+		Optional.ofNullable(this.body).orElseGet(() ->
+			this.body =BodySourceGenerator.createSimple().setDelimiters("(\n", "\n)").setBodyElementSeparator(",\n").setElementPrefix("\t")
 		);
-		BodySourceGenerator innBody = BodySourceGenerator.createSimple().setBodyElementSeparator(", ");
+		BodySourceGenerator innBody = BodySourceGenerator.createSimple().setBodyElementSeparator(",\n").setElementPrefix("\t");
 		if (name != null) {
 			if (isArray) {
-				innBody.setDelimiters(name + " = {", "}");
+				innBody.setDelimiters(name + " = {\n", "\n}");
 			} else {
 				innBody.setDelimiters(name + " = ", null);
 			}
 		} else if (isArray) {
 			innBody.setDelimiters("{", "}");
+		} else {
+			innBody.setElementPrefix(null);
 		}
 		for (AnnotationSourceGenerator parameter : parameters) {
 			innBody.addElement(parameter);
@@ -126,8 +134,8 @@ public class AnnotationSourceGenerator extends SourceGenerator.Abst {
 	}
 	
 	public AnnotationSourceGenerator useType(java.lang.Class<?>... classes) {
-		this.body = Optional.ofNullable(this.body).orElseGet(() ->
-			BodySourceGenerator.createSimple().setDelimiters("(", ")").setBodyElementSeparator(", ")
+		Optional.ofNullable(this.body).orElseGet(() ->
+			this.body =BodySourceGenerator.createSimple().setDelimiters("(\n", "\n)").setBodyElementSeparator(",\n").setElementPrefix("\t")
 		);
 		body.useType(classes);
 		return this;	

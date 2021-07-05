@@ -29,6 +29,7 @@
 package org.burningwave.core.classes;
 
 import static org.burningwave.core.assembler.StaticComponentContainer.ClassLoaders;
+import static org.burningwave.core.assembler.StaticComponentContainer.ManagedLoggersRepository;
 import static org.burningwave.core.assembler.StaticComponentContainer.Synchronizer;
 import static org.burningwave.core.assembler.StaticComponentContainer.Throwables;
 
@@ -53,7 +54,6 @@ import org.burningwave.core.io.PathHelper;
 
 
 public class PathScannerClassLoader extends org.burningwave.core.classes.MemoryClassLoader {
-	Collection<String> allLoadedPaths;
 	Collection<String> loadedPaths;
 	PathHelper pathHelper;
 	FileSystemItem.Criteria classFileCriteriaAndConsumer;
@@ -72,11 +72,11 @@ public class PathScannerClassLoader extends org.burningwave.core.classes.MemoryC
 			Map<String, Object> defaultValues = new HashMap<>();
 			
 			defaultValues = new HashMap<>();
-			defaultValues.put(Configuration.Key.PARENT_CLASS_LOADER + CodeExecutor.Configuration.Key.PROPERTIES_FILE_CODE_EXECUTOR_IMPORTS_SUFFIX,
+			defaultValues.put(Configuration.Key.PARENT_CLASS_LOADER + CodeExecutor.Configuration.Key.PROPERTIES_FILE_SUPPLIER_IMPORTS_SUFFIX,
 				"${"+ CodeExecutor.Configuration.Key.COMMON_IMPORTS + "}" + CodeExecutor.Configuration.Value.CODE_LINE_SEPARATOR + 
-				"${"+ Configuration.Key.PARENT_CLASS_LOADER + ".additional-imports}" +  CodeExecutor.Configuration.Value.CODE_LINE_SEPARATOR				
+				"${"+ Configuration.Key.PARENT_CLASS_LOADER + "." + CodeExecutor.Configuration.Key.PROPERTIES_FILE_SUPPLIER_KEY + ".additional-imports}" +  CodeExecutor.Configuration.Value.CODE_LINE_SEPARATOR				
 			);
-			defaultValues.put(Configuration.Key.PARENT_CLASS_LOADER + CodeExecutor.Configuration.Key.PROPERTIES_FILE_CODE_EXECUTOR_NAME_SUFFIX, PathScannerClassLoader.class.getPackage().getName() + ".ParentClassLoaderRetrieverForPathScannerClassLoader");
+			defaultValues.put(Configuration.Key.PARENT_CLASS_LOADER + CodeExecutor.Configuration.Key.PROPERTIES_FILE_SUPPLIER_NAME_SUFFIX, PathScannerClassLoader.class.getPackage().getName() + ".ParentClassLoaderRetrieverForPathScannerClassLoader");
 			//DEFAULT_VALUES.put(Key.PARENT_CLASS_LOADER_FOR_PATH_SCANNER_CLASS_LOADER, "Thread.currentThread().getContextClassLoader()");
 			defaultValues.put(Key.PARENT_CLASS_LOADER, Thread.currentThread().getContextClassLoader());
 			defaultValues.put(Key.SEARCH_CONFIG_CHECK_FILE_OPTION, FileSystemItem.CheckingOption.FOR_NAME.getLabel());
@@ -89,14 +89,13 @@ public class PathScannerClassLoader extends org.burningwave.core.classes.MemoryC
         ClassLoader.registerAsParallelCapable();
     }
 	
-	PathScannerClassLoader(
+	protected PathScannerClassLoader(
 		ClassLoader parentClassLoader,
 		PathHelper pathHelper,
 		FileSystemItem.Criteria scanFileCriteria
 	) {
 		super(parentClassLoader);
 		this.pathHelper = pathHelper;
-		this.allLoadedPaths = ConcurrentHashMap.newKeySet();
 		this.loadedPaths = ConcurrentHashMap.newKeySet();
 		this.classFileCriteriaAndConsumer = scanFileCriteria.createCopy().and().allFileThat((child, pathFIS) -> {
 			JavaClass.use(child.toByteBuffer(), javaClass ->
@@ -105,7 +104,7 @@ public class PathScannerClassLoader extends org.burningwave.core.classes.MemoryC
 			return true;
 		}).setExceptionHandler((exc, childAndPath) -> {
 			if (!isClosed) {
-				logError("Exception occurred while scanning {}", exc, childAndPath[0].getAbsolutePath());
+				ManagedLoggersRepository.logError(getClass()::getName, "Exception occurred while scanning {}", exc, childAndPath[0].getAbsolutePath());
 			} else {
 				Throwables.throwException(exc);
 			}
@@ -125,9 +124,9 @@ public class PathScannerClassLoader extends org.burningwave.core.classes.MemoryC
 		Collection<String> scannedPaths = new HashSet<>();
 		try {
 			for (String path : paths) {
-				if (checkForAddedClasses.test(path) || !hasBeenLoaded(path, !checkForAddedClasses.test(path))) {
+				if (checkForAddedClasses.test(path) || !hasBeenLoaded(path)) {
 					Synchronizer.execute(instanceId + "_" + path, () -> {
-						if (checkForAddedClasses.test(path) || !hasBeenLoaded(path, !checkForAddedClasses.test(path))) {
+						if (checkForAddedClasses.test(path) || !hasBeenLoaded(path)) {
 							FileSystemItem pathFIS = FileSystemItem.ofPath(path);
 							if (checkForAddedClasses.test(path)) {
 								pathFIS.refresh();
@@ -139,7 +138,6 @@ public class PathScannerClassLoader extends org.burningwave.core.classes.MemoryC
 								);
 							}
 							loadedPaths.add(path);
-							allLoadedPaths.add(path);
 							scannedPaths.add(path);
 						}
 					});
@@ -147,7 +145,7 @@ public class PathScannerClassLoader extends org.burningwave.core.classes.MemoryC
 			}
 		} catch (Throwable exc) {
 			if (isClosed) {
-				logWarn("Could not execute scanPathsAndAddAllByteCodesFound because {} has been closed", this.toString());
+				ManagedLoggersRepository.logWarn(getClass()::getName, "Could not execute scanPathsAndAddAllByteCodesFound because {} has been closed", this.toString());
 			} else {
 				throw exc;
 			}
@@ -254,18 +252,13 @@ public class PathScannerClassLoader extends org.burningwave.core.classes.MemoryC
 	}
 	
 	public boolean hasBeenLoaded(String path) {
-		return hasBeenLoaded(path, true);
-	}
-	
-	public boolean hasBeenLoaded(String path, boolean considerURLClassLoaderPathsAsLoadedPaths) {
-		if (allLoadedPaths.contains(path)) {
+		if (loadedPaths.contains(path)) {
 			return true;
 		}
 		FileSystemItem pathFIS = FileSystemItem.ofPath(path);
-		for (String loadedPath : ClassLoaders.getAllLoadedPaths(this, considerURLClassLoaderPathsAsLoadedPaths)) {
+		for (String loadedPath : ClassLoaders.getAllLoadedPaths(this.getParent())) {
 			FileSystemItem loadedPathFIS = FileSystemItem.ofPath(loadedPath);
 			if (pathFIS.isChildOf(loadedPathFIS) || pathFIS.equals(loadedPathFIS)) {
-				allLoadedPaths.add(path);
 				return true;
 			}
 		}
@@ -278,8 +271,6 @@ public class PathScannerClassLoader extends org.burningwave.core.classes.MemoryC
 			super.close();
 			this.loadedPaths.clear();
 			this.loadedPaths = null;
-			this.allLoadedPaths.clear();
-			this.allLoadedPaths = null;
 			pathHelper = null;
 			classFileCriteriaAndConsumer = null;
 		});

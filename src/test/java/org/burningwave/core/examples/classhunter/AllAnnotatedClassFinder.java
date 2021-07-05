@@ -28,35 +28,29 @@ public class AllAnnotatedClassFinder {
             //With the row below the search will be executed on runtime Classpaths
             pathHelper.getMainClassPaths()
         ).by(
-            ClassCriteria.create().allThat((cls) -> {
+            ClassCriteria.create().allThoseThatMatch((cls) -> {
                 return cls.getAnnotations() != null && cls.getAnnotations().length > 0;
             }).or().byMembers(
-                MethodCriteria.byScanUpTo((lastClassInHierarchy, currentScannedClass) -> {
-                    return lastClassInHierarchy.equals(currentScannedClass);
-                }).allThat((method) -> {
+                MethodCriteria.withoutConsideringParentClasses().allThoseThatMatch((method) -> {
                     return method.getAnnotations() != null && method.getAnnotations().length > 0;
                 })
             ).or().byMembers(
-                FieldCriteria.byScanUpTo((lastClassInHierarchy, currentScannedClass) -> {
-                    return lastClassInHierarchy.equals(currentScannedClass);
-                }).allThat((field) -> {
+                FieldCriteria.withoutConsideringParentClasses().allThoseThatMatch((field) -> {
                     return field.getAnnotations() != null && field.getAnnotations().length > 0;
                 })
             ).or().byMembers(
-                ConstructorCriteria.byScanUpTo((lastClassInHierarchy, currentScannedClass) -> {
-                    return lastClassInHierarchy.equals(currentScannedClass);
-                }).allThat((ctor) -> {
+                ConstructorCriteria.withoutConsideringParentClasses().allThoseThatMatch((ctor) -> {
                     return ctor.getAnnotations() != null && ctor.getAnnotations().length > 0;
                 })
             )
         );
 
         try (SearchResult searchResult = classHunter.loadInCache(searchConfig).find()) {
-	
-	    //If you need all annotaded methods unconment this
-	    //searchResult.getMembersFlatMap().values();
-	
-	    return searchResult.getClasses();
+    
+            //If you need all annotaded methods unconment this
+            //searchResult.getMembersFlatMap().values();
+    
+            return searchResult.getClasses();
         }
     }
 }

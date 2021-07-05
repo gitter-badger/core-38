@@ -31,17 +31,16 @@ package org.burningwave.core.classes;
 import static org.burningwave.core.assembler.StaticComponentContainer.ByteBufferHandler;
 import static org.burningwave.core.assembler.StaticComponentContainer.Classes;
 import static org.burningwave.core.assembler.StaticComponentContainer.Streams;
-import static org.burningwave.core.assembler.StaticComponentContainer.Throwables;
 
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Optional;
 import java.util.function.Consumer;
 
+import org.burningwave.core.Closeable;
 import org.burningwave.core.function.ThrowingFunction;
 import org.burningwave.core.io.FileSystemItem;
 
-public class JavaClass implements AutoCloseable {
+public class JavaClass implements Closeable {
 	private ByteBuffer byteCode;
 	private String classNameSlashed;
 	private String className;
@@ -51,16 +50,20 @@ public class JavaClass implements AutoCloseable {
 		this.byteCode = byteCode;
 	}
 	
-	JavaClass(ByteBuffer byteCode) throws IOException {
+	JavaClass(Class<?> cls) {
+		this(cls.getName(), Classes.getByteCode(cls));
+	}
+	
+	JavaClass(ByteBuffer byteCode) {
 		this(Classes.retrieveName(byteCode), Streams.shareContent(byteCode));
 	}
 	
+	public static JavaClass create(Class<?> cls) {
+		return new JavaClass(cls); 
+	}
+	
 	public static JavaClass create(ByteBuffer byteCode) {
-		try {
-			return new JavaClass(byteCode);
-		} catch (IOException exc) {
-			return Throwables.throwException(exc);
-		}
+		return new JavaClass(byteCode);
 	}
 	
 	public static void use(ByteBuffer byteCode, Consumer<JavaClass> javaClassConsumer) {
@@ -163,7 +166,7 @@ public class JavaClass implements AutoCloseable {
 		return getName();
 	}
 	
-	public static class Criteria extends org.burningwave.core.Criteria<JavaClass, Criteria, org.burningwave.core.Criteria.TestContext<JavaClass, Criteria>>{
+	protected static class Criteria extends org.burningwave.core.Criteria<JavaClass, Criteria, org.burningwave.core.Criteria.TestContext<JavaClass, Criteria>>{
 		
 		public static Criteria create() {
 			return new Criteria();

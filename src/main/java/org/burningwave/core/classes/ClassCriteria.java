@@ -46,12 +46,12 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
-import org.burningwave.core.Component;
 import org.burningwave.core.Criteria;
+import org.burningwave.core.ManagedLogger;
 import org.burningwave.core.function.PentaPredicate;
 
 @SuppressWarnings("unchecked")
-public class ClassCriteria extends CriteriaWithClassElementsSupplyingSupport<Class<?>, ClassCriteria, ClassCriteria.TestContext> implements Component {
+public class ClassCriteria extends CriteriaWithClassElementsSupplyingSupport<Class<?>, ClassCriteria, ClassCriteria.TestContext> implements ManagedLogger {
 	Map<String, MemberCriteria<?, ?, ?>> memberCriterias;
 	PentaPredicate<ClassCriteria, TestContext, MemberCriteria<?, ?, ?>, String, Class<?>> membersPredicate;
 	private boolean collectMembers;
@@ -59,6 +59,52 @@ public class ClassCriteria extends CriteriaWithClassElementsSupplyingSupport<Cla
 	private ClassCriteria() {
 		super();
 		memberCriterias = new HashMap<>();
+	}
+	
+	public ClassCriteria allThoseThatHaveAMatchInHierarchy(BiPredicate<TestContext, Class<?>> predicate) {
+		return super.allThoseThatMatch((testContext, cls) -> {
+            while (cls != null) {
+                if (predicate.test(testContext, cls)) {
+                    return true;
+                }
+                cls = cls.getSuperclass();
+            }
+            return false;
+        });
+	}
+	
+	public ClassCriteria allThoseThatHaveAMatchInHierarchy(Predicate<Class<?>> predicate) {
+		return super.allThoseThatMatch((cls) -> {
+            while (cls != null) {
+                if (predicate.test(cls)) {
+                    return true;
+                }
+                cls = cls.getSuperclass();
+            }
+            return false;
+        });
+	}
+	
+	public ClassCriteria byClassesThatHaveAMatchInHierarchy(BiPredicate<Map<Class<?>, Class<?>>, Class<?>> predicate) {
+		return byClassesThatMatch((uploadedClasses, cls) -> {
+            while (cls != null) {
+                if (predicate.test(uploadedClasses, cls)) {
+                    return true;
+                }
+                cls = cls.getSuperclass();
+            }
+            return false;
+        });
+	}
+	
+	public ClassCriteria byClassesThatMatch(BiPredicate<Map<Class<?>, Class<?>>, Class<?>> predicate) {
+		this.predicate = concat(
+			this.predicate,
+			(context, cls) -> {
+				return predicate.test(context.getCriteria().getUploadedClasses(), cls);
+			}
+		);
+		return this;
 	}
 	
 	public static ClassCriteria create() {
@@ -160,16 +206,6 @@ public class ClassCriteria extends CriteriaWithClassElementsSupplyingSupport<Cla
 					criteria.getLoadedBytecode(), 
 					Streams.toByteArray(criteria.byteCodeSupplier.apply(cls))
 				);
-			}
-		);
-		return this;
-	}
-	
-	public ClassCriteria byClasses(BiPredicate<Map<Class<?>, Class<?>>, Class<?>> predicate) {
-		this.predicate = concat(
-			this.predicate,
-			(context, cls) -> {
-				return predicate.test(context.getCriteria().getUploadedClasses(), cls);
 			}
 		);
 		return this;

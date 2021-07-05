@@ -3,7 +3,7 @@
 
 	<groupId>org.burningwave</groupId>
 	<artifactId>core</artifactId>
-	<version>8.3.1-SNAPSHOT</version>
+	<version>8.21.3-SNAPSHOT</version>
 	<packaging>jar</packaging>
 
 	<name>Burningwave Core</name>
@@ -39,12 +39,22 @@
 				<role>Developer</role>
 			</roles>
 		</developer>
+		<developer>
+			<name>Alessio Perrotta</name>
+			<email>info@burningwave.org</email>
+			<organization>Burningwave</organization>
+			<organizationUrl>https://www.burningwave.org/</organizationUrl>
+			<roles>
+				<role>External relationship manager</role>
+				<role>Developer</role>
+			</roles>
+		</developer>
 	</developers>
 
 	<properties>
 		<copyright.holder>Roberto Gentili</copyright.holder>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-		<!-- Can be changed with one of this values: 9, 10, 11, 12, 13, 14, 15, 16 -->
+		<!-- Can be changed with one of this values: 9, 10, 11, 12, 13, 14, 15, 16, 17 -->
 		<project_jdk_version>8</project_jdk_version>
 		<javadocExecutable.relativePath>bin/javadoc</javadocExecutable.relativePath>
 		<skipTests>true</skipTests>
@@ -64,13 +74,13 @@
 		<maven-deploy-plugin.version>2.8.2</maven-deploy-plugin.version>
 		<maven-gpg-plugin.version>1.6</maven-gpg-plugin.version>
 		<maven-jar-plugin.version>3.2.0</maven-jar-plugin.version>
-		<maven-javadoc-plugin.version>3.1.1</maven-javadoc-plugin.version>
+		<maven-javadoc-plugin.version>3.2.0</maven-javadoc-plugin.version>
 		<maven-jxr-plugin.version>2.5</maven-jxr-plugin.version>
 		<maven-release-plugin.version>2.5.3</maven-release-plugin.version>
 		<maven-source-plugin.version>3.0.1</maven-source-plugin.version>
 		<maven-scm-provider-gitexe.version>1.9.5</maven-scm-provider-gitexe.version>
-		<maven-surefire-plugin.version>2.9</maven-surefire-plugin.version>
-		<nexus-staging-maven-plugin.version>1.6.7</nexus-staging-maven-plugin.version>
+		<maven-surefire-plugin.version>2.21.0</maven-surefire-plugin.version>
+		<nexus-staging-maven-plugin.version>1.6.8</nexus-staging-maven-plugin.version>
 		<slf4j.version>1.7.30</slf4j.version>
 	</properties>
 
@@ -180,7 +190,7 @@
 					<include>**</include>
 				</includes>
 				<excludes>
-					<exclude>compileClassLoaderDelegate.cmd</exclude>
+					<exclude>compileExternalClasses.cmd</exclude>
 					<exclude>jdk/internal/loader/BuiltinClassLoader.class</exclude>
 					<exclude>jdk/internal/loader/URLClassPath.class</exclude>
 				</excludes>
@@ -234,6 +244,7 @@
 				<configuration>
 					<excludes>
 						<exclude>jdk/</exclude>
+						<exclude>java/</exclude>
 						<exclude>META-INF/maven/</exclude>
 					</excludes>
 					<archive>
@@ -282,7 +293,7 @@
 				<version>${nexus-staging-maven-plugin.version}</version>
 				<extensions>true</extensions>
 				<configuration>
-					<!-- <stagingProgressTimeoutMinutes>10</stagingProgressTimeoutMinutes> -->
+					<!-- <stagingProgressTimeoutMinutes>30</stagingProgressTimeoutMinutes> -->
 					<serverId>ossrh</serverId>
 					<nexusUrl>https://oss.sonatype.org/</nexusUrl>
 					<autoReleaseAfterClose>true</autoReleaseAfterClose>
@@ -294,7 +305,9 @@
 				<version>${maven-source-plugin.version}</version>
 				<configuration>
 					<excludes>
-						<exclude>org/burningwave/core/classes/ClassLoaderDelegate.bwc</exclude>
+						<exclude>org/burningwave/core/jvm/AccessibleSetterRetrieverForJDK9.bwc</exclude>
+						<exclude>org/burningwave/core/jvm/ClassLoaderDelegateForJDK9.bwc</exclude>
+						<exclude>org/burningwave/core/jvm/ConsulterRetrieverForJDK9.bwc</exclude>
 					</excludes>
 				</configuration>
 				<executions>
@@ -402,6 +415,13 @@
 								</goals>
 							</execution>
 						</executions>
+						<configuration>
+					        <excludes>
+						        <exclude>**/*AccessibleSetterInvokerForJDK9.*</exclude>
+						        <exclude>**/*ClassLoaderDelegateForJDK9.*</exclude>
+						        <exclude>**/*ConsulterRetrieverForJDK9.*</exclude>
+						    </excludes>
+					    </configuration>
 					</plugin>
 				</plugins>
 			</build>

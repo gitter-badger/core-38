@@ -1,5 +1,7 @@
 package org.burningwave.core.service;
 
+import java.util.Arrays;
+
 import org.burningwave.core.Component;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -7,6 +9,24 @@ import org.slf4j.LoggerFactory;
 
 public class Service implements Component {
 	private final static Logger LOGGER = LoggerFactory.getLogger(Service.class);
+	
+	private String name;
+	
+	public Service() {
+		this("Default name");
+	}
+	
+	public Service(String name) {
+		this.name = name;
+	}
+	
+	public String getName() {
+		return this.name;
+	}
+	
+	public void printName() {
+		LOGGER.info("My name is {}", this.name);
+	}
 	
 	public static Object retrieve() {
 		LOGGER.info("static retrieve");
@@ -93,6 +113,10 @@ public class Service implements Component {
 	
 	public static void staticAccept(Service service, String value_01, String value_02, String value_03) {
 		LOGGER.info("QuadConsumer: " + value_01 + " " + value_02 + " " + value_03);
+	}
+	
+	public void withArray(String[] values) {
+		LOGGER.info("withArray: " + String.join(", ", Arrays.asList(values)));
 	}
 	
 }

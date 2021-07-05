@@ -39,58 +39,58 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.function.Supplier;
 
+import org.burningwave.core.assembler.ComponentContainer;
 import org.burningwave.core.classes.ClassHunter;
 import org.burningwave.core.classes.ClassPathHunter;
 import org.burningwave.core.classes.MemoryClassLoader;
 import org.burningwave.core.classes.PathScannerClassLoader;
-import org.burningwave.core.classes.SearchContext;
 import org.burningwave.core.iterable.Properties.Event;
 import org.burningwave.core.jvm.LowLevelObjectsHandler;
 
 public interface ManagedLogger {	
 	
 	default void logTrace(String message) {
-		ManagedLoggersRepository.logTrace(() -> this.getClass().getName(), message);
+		ManagedLoggersRepository.logTrace(getClass()::getName, message);
 	}
 	
 	default void logTrace(String message, Object... arguments) {
-		ManagedLoggersRepository.logTrace(() -> this.getClass().getName(), message, arguments);
+		ManagedLoggersRepository.logTrace(getClass()::getName, message, arguments);
 	}
 	
 	default void logDebug(String message) {
-		ManagedLoggersRepository.logDebug(() -> this.getClass().getName(), message);
+		ManagedLoggersRepository.logDebug(getClass()::getName, message);
 	}
 	
 	default void logDebug(String message, Object... arguments) {
-		ManagedLoggersRepository.logDebug(() -> this.getClass().getName(), message, arguments);
+		ManagedLoggersRepository.logDebug(getClass()::getName, message, arguments);
 	}
 	
 	default void logInfo(String message) {
-		ManagedLoggersRepository.logInfo(() -> this.getClass().getName(), message);
+		ManagedLoggersRepository.logInfo(getClass()::getName, message);
 	}
 	
 	default void logInfo(String message, Object... arguments) {
-		ManagedLoggersRepository.logInfo(() -> this.getClass().getName(), message, arguments);
+		ManagedLoggersRepository.logInfo(getClass()::getName, message, arguments);
 	}
 	
 	default void logWarn(String message) {
-		ManagedLoggersRepository.logWarn(() -> this.getClass().getName(), message);
+		ManagedLoggersRepository.logWarn(getClass()::getName, message);
 	}
 	
 	default void logWarn(String message, Object... arguments) {
-		ManagedLoggersRepository.logWarn(() -> this.getClass().getName(), message, arguments);
+		ManagedLoggersRepository.logWarn(getClass()::getName, message, arguments);
 	}
 	
 	default void logError(String message, Throwable exc, Object... arguments) {
-		ManagedLoggersRepository.logError(() -> this.getClass().getName(), message, exc, arguments);
+		ManagedLoggersRepository.logError(getClass()::getName, message, exc, arguments);
 	}
 	
 	default void logError(String message, Object... arguments) {
-		ManagedLoggersRepository.logError(() -> this.getClass().getName(), message, arguments);
+		ManagedLoggersRepository.logError(getClass()::getName, message, arguments);
 	}
 	
 	default void logError(String message, Throwable exc) {
-		ManagedLoggersRepository.logError(() -> this.getClass().getName(), message, exc);
+		ManagedLoggersRepository.logError(getClass()::getName, message, exc);
 	}
 	
 	default void logError(String message) {
@@ -129,12 +129,13 @@ public interface ManagedLogger {
 				defaultValues.put(Key.TYPE, "autodetect");
 				defaultValues.put(Key.ENABLED_FLAG, String.valueOf(true));
 				defaultValues.put(Key.WARN_LOGGING_DISABLED_FOR,
-					ClassHunter.SearchContext.class.getName() + ";" +
-					ClassPathHunter.SearchContext.class.getName() + ";" +
+					ClassHunter.class.getName() + "Impl$SearchContext;" +
+					ClassPathHunter.class.getName() + "Impl$SearchContext;" +
+					ComponentContainer.PathScannerClassLoader.class.getName() + ";" +
 					LowLevelObjectsHandler.class.getName() + ";" +
 					MemoryClassLoader.class.getName() + ";" +
 					PathScannerClassLoader.class.getName() + ";" +
-					SearchContext.class.getName() + ";"
+					ClassHunter.class.getPackage().getName() + ".SearchContext;"
 				);				
 				
 				DEFAULT_VALUES = Collections.unmodifiableMap(defaultValues);

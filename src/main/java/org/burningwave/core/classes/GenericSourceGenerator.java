@@ -33,6 +33,9 @@ import java.util.Collection;
 import java.util.Optional;
 
 public class GenericSourceGenerator extends SourceGenerator.Abst {
+
+	private static final long serialVersionUID = -7508101348682677540L;
+	
 	private Collection<String> outerCode;
 	private Collection<AnnotationSourceGenerator> annotations;
 	private TypeDeclarationSourceGenerator type;
@@ -59,7 +62,7 @@ public class GenericSourceGenerator extends SourceGenerator.Abst {
 	}	
 	
 	public GenericSourceGenerator addOuterCode(String... codes) {
-		this.outerCode = Optional.ofNullable(this.outerCode).orElseGet(ArrayList::new);
+		Optional.ofNullable(this.outerCode).orElseGet(() -> this.outerCode = new ArrayList<>());
 		for (String code : codes) {
 			this.outerCode.add(code);
 		}
@@ -67,7 +70,7 @@ public class GenericSourceGenerator extends SourceGenerator.Abst {
 	}
 	
 	public GenericSourceGenerator addAnnotation(AnnotationSourceGenerator... annotations) {
-		this.annotations = Optional.ofNullable(this.annotations).orElseGet(ArrayList::new);
+		Optional.ofNullable(this.annotations).orElseGet(() -> this.annotations = new ArrayList<>());
 		for (AnnotationSourceGenerator annotation : annotations) {
 			this.annotations.add(annotation);
 		}
@@ -90,7 +93,7 @@ public class GenericSourceGenerator extends SourceGenerator.Abst {
 		return this;
 	}
 	
-	Collection<TypeDeclarationSourceGenerator> getTypesDeclarations() {
+	Collection<TypeDeclarationSourceGenerator> getTypeDeclarations() {
 		Collection<TypeDeclarationSourceGenerator> types = new ArrayList<>();
 		Optional.ofNullable(annotations).ifPresent(annotations -> {
 			for (AnnotationSourceGenerator annotation : annotations) {

@@ -28,223 +28,39 @@
  */
 package org.burningwave.core.classes;
 
-import static org.burningwave.core.assembler.StaticComponentContainer.Cache;
-import static org.burningwave.core.assembler.StaticComponentContainer.Classes;
-import static org.burningwave.core.assembler.StaticComponentContainer.Methods;
+import java.lang.reflect.Executable;
 
-import java.lang.invoke.LambdaMetafactory;
-import java.lang.invoke.MethodHandle;
-import java.lang.invoke.MethodHandles.Lookup;
-import java.lang.invoke.MethodType;
-import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
-import java.lang.reflect.Parameter;
-import java.util.AbstractMap;
-import java.util.Map;
-import java.util.Optional;
-import java.util.function.Consumer;
-import java.util.function.Function;
-import java.util.function.Predicate;
-import java.util.function.Supplier;
-import java.util.stream.Stream;
-
-import org.burningwave.core.Component;
-import org.burningwave.core.function.Executor;
-import org.burningwave.core.function.ThrowingSupplier;
-
-public class FunctionalInterfaceFactory implements Component {
-	private ClassFactory classFactory;
+public interface FunctionalInterfaceFactory {
 	
-	private FunctionalInterfaceFactory(ClassFactory classFactory) {
-		this.classFactory = classFactory;
-	}
-
 	public static FunctionalInterfaceFactory create(ClassFactory classFactory) {
-		return new FunctionalInterfaceFactory(classFactory);
+		return new FunctionalInterfaceFactoryImpl(classFactory);
 	}
 	
-	public <T> T getOrCreate(Class<?> targetClass, String methodName, Class<?>... argumentTypes) {
-		return getOrCreate(Methods.findOneAndMakeItAccessible(targetClass, methodName, argumentTypes));
-	}
+	public <T> T getOrCreate(Class<?> targetClass, Class<?>... argumentTypes);
 	
-	public <F> F getOrCreate(Method targetMethod) {
-		if (targetMethod.getParameterTypes().length == 0 && targetMethod.getReturnType() == void.class) {
-			return getBindedRunnable(targetMethod);
-		} else if (targetMethod.getParameterTypes().length == 0 && targetMethod.getReturnType() != void.class) {
-			return getBindedSupplier(targetMethod);
-		} else if (targetMethod.getParameterTypes().length > 0 && targetMethod.getReturnType() == void.class) {
-			return getBindedConsumer(targetMethod);
-		} else if (targetMethod.getParameterTypes().length > 0 && (targetMethod.getReturnType() == boolean.class || targetMethod.getReturnType() == Boolean.class)) {
-			return getBindedPredicate(targetMethod);
-		} else if (targetMethod.getParameterTypes().length > 0 && targetMethod.getReturnType() != void.class) {
-			return getBindedFunction(targetMethod);
-		}
-		return null;
-	}
+	public <T> T getOrCreate(Class<?> targetClass, String methodName, Class<?>... argumentTypes);
+	
+	public <F> F getOrCreate(Executable executable);
 
-	@SuppressWarnings("unchecked")
-	<F> F getBindedRunnable(Method targetMethod) {
-		return (F) Cache.bindedFunctionalInterfaces.getOrUploadIfAbsent(
-			Classes.getClassLoader(targetMethod.getDeclaringClass()), 
-			getCacheKey(targetMethod), () -> 
-			Executor.get(() ->
-				bindTo(
-					targetMethod, () -> 
-						Modifier.isStatic(targetMethod.getModifiers()) ?
-							new AbstractMap.SimpleEntry<>(Runnable.class, "run") :
-							new AbstractMap.SimpleEntry<>(Consumer.class, "accept"),
-						methodHandle ->
-							methodHandle.type().generic().changeReturnType(void.class)
-				)
-			)
-		);
-	}
+	public <T> T getOrCreateFunction(Class<?> targetClass, String methodName, Class<?>... argumentTypes);
 
-	@SuppressWarnings("unchecked")
-	<F> F getBindedSupplier(Method targetMethod) {
-		return (F) Cache.bindedFunctionalInterfaces.getOrUploadIfAbsent(
-			Classes.getClassLoader(targetMethod.getDeclaringClass()),	
-			getCacheKey(targetMethod), () -> 
-			Executor.get(() -> 
-				bindTo(
-					targetMethod, () -> 
-						Modifier.isStatic(targetMethod.getModifiers()) ?
-							new AbstractMap.SimpleEntry<>(Supplier.class, "get") :
-							new AbstractMap.SimpleEntry<>(Function.class, "apply"),
-						methodHandle ->
-							methodHandle.type().generic()
-				)
-			)
-		);
-	}
+	public <T> T getOrCreatePredicate(Class<?> targetClass, String methodName, Class<?>... argumentTypes);
+	
+	public <T> T getOrCreateConsumer(Class<?> targetClass, String methodName, Class<?>... argumentTypes);
+	
+	public <T> T getOrCreateSupplier(Class<?> targetClass, String methodName);
+	
+	public <T> Class<T> loadOrBuildAndDefineFunctionSubType(int parametersCount);
 
-	@SuppressWarnings("unchecked")
-	<F> F getBindedFunction(Method targetMethod) {
-		return (F) Cache.bindedFunctionalInterfaces.getOrUploadIfAbsent(
-			Classes.getClassLoader(targetMethod.getDeclaringClass()),
-			getCacheKey(targetMethod), () -> 
-			Executor.get(() -> bindTo(
-				targetMethod, () -> 
-					new AbstractMap.SimpleEntry<>(
-						retrieveClass(
-							Function.class,
-							(parameterCount) -> 
-								classFactory.loadOrBuildAndDefineFunctionSubType(
-									targetMethod.getDeclaringClass().getClassLoader(), parameterCount
-								),
-							Modifier.isStatic(targetMethod.getModifiers()) ?
-								targetMethod.getParameterCount() : 
-								targetMethod.getParameterCount() + 1
-						), 
-						"apply"
-					),
-					methodHandle ->
-						methodHandle.type().generic()
-				)
-			)
-		);
-	}
+	public <T> Class<T> loadOrBuildAndDefineFunctionSubType(ClassLoader classLoader, int parametersLength);
 
-	@SuppressWarnings("unchecked")
-	<F> F getBindedConsumer(Method targetMethod) {
-		return (F) Cache.bindedFunctionalInterfaces.getOrUploadIfAbsent(
-			Classes.getClassLoader(targetMethod.getDeclaringClass()),
-			getCacheKey(targetMethod), () -> 
-			Executor.get(() ->
-				bindTo(
-					targetMethod, () -> 
-						new AbstractMap.SimpleEntry<>(
-							retrieveClass(
-								Consumer.class,
-								(parameterCount) ->
-									classFactory.loadOrBuildAndDefineConsumerSubType(targetMethod.getDeclaringClass().getClassLoader(), parameterCount),
-								Modifier.isStatic(targetMethod.getModifiers()) ?
-									targetMethod.getParameterCount() : 
-									targetMethod.getParameterCount() + 1
-							), 
-							"accept"
-						),
-						methodHandle ->
-							methodHandle.type().generic().changeReturnType(void.class)
-				)
-			)
-		);
-	}
+	public <T> Class<T> loadOrBuildAndDefineConsumerSubType(int parametersCount);
 
-	@SuppressWarnings("unchecked")
-	<F> F getBindedPredicate(Method targetMethod) {
-		return (F) Cache.bindedFunctionalInterfaces.getOrUploadIfAbsent(
-			Classes.getClassLoader(targetMethod.getDeclaringClass()),
-			getCacheKey(targetMethod), () -> 
-			Executor.get(() -> bindTo(
-					targetMethod, () -> 
-					new AbstractMap.SimpleEntry<>(
-						retrieveClass(
-							Predicate.class,
-							(parameterCount) ->
-								classFactory.loadOrBuildAndDefinePredicateSubType(targetMethod.getDeclaringClass().getClassLoader(), parameterCount),
-							Modifier.isStatic(targetMethod.getModifiers()) ?
-								targetMethod.getParameterCount() : 
-								targetMethod.getParameterCount() + 1
-						), 
-						"test"
-					),
-					methodHandle ->
-						methodHandle.type().generic().changeReturnType(boolean.class)
-				)
-			)
-		);
-	}
+	public <T> Class<T> loadOrBuildAndDefineConsumerSubType(ClassLoader classLoader, int parametersLength);
+
+	public <T> Class<T> loadOrBuildAndDefinePredicateSubType(int parametersLength);
+
+	public <T> Class<T> loadOrBuildAndDefinePredicateSubType(ClassLoader classLoader, int parametersLength);
+
 	
-	private <F> F bindTo(
-		Method targetMethod, 
-		ThrowingSupplier<Map.Entry<Class<?>, String>, Throwable> functionalInterfaceBagSupplier,
-		Function<MethodHandle, MethodType> functionalInterfaceSignatureSupplier
-	) throws Throwable {
-		Map.Entry<Lookup, MethodHandle> methodHandleBag = Methods.convertToMethodHandleBag(targetMethod);
-		MethodHandle methodHandle = methodHandleBag.getValue();
-		Map.Entry<Class<?>, String> functionalInterfaceBag = functionalInterfaceBagSupplier.get();
-		return (F)LambdaMetafactory.metafactory(
-			methodHandleBag.getKey(),
-			functionalInterfaceBag.getValue(),
-		    MethodType.methodType(functionalInterfaceBag.getKey()),
-		    functionalInterfaceSignatureSupplier.apply(methodHandle),
-		    methodHandle, 
-		    methodHandle.type()
-		).getTarget().invoke();
-	}
-	
-	Class<?> retrieveClass(Class<?> cls, Function<Integer, Class<?>> classRetriever, int parametersCount) throws ClassNotFoundException {
-		if (parametersCount < 3) {
-			return Class.forName(retrieveClassName(cls, parametersCount));	
-		} else {
-			return classRetriever.apply(parametersCount);
-		}
-	}
-	
-	String retrieveClassName(Class<?>cls, int parametersCount) {
-		switch (parametersCount) {
-        	case 2:
-        		return Optional.ofNullable(cls.getPackage()).map(pkg -> pkg.getName()).orElse(null) + ".Bi" + cls.getSimpleName();
-        	default : 
-        		return cls.getName();
-		}
-	}
-	
-	String getCacheKey(Method targetMethod) {
-		Class<?> targetMethodDeclaringClass = targetMethod.getDeclaringClass();
-		Parameter[] parameters = targetMethod.getParameters();
-		String argumentsKey = "";
-		if (parameters != null && parameters.length > 0) {
-			StringBuffer argumentsKeyStringBuffer = new StringBuffer();
-			Stream.of(parameters).forEach(parameter ->
-				argumentsKeyStringBuffer.append("/" + parameter.getType().getName())
-			);
-			argumentsKey = argumentsKeyStringBuffer.toString();
-		}
-		String cacheKey = "/" + targetMethodDeclaringClass.getName() + "@" + targetMethodDeclaringClass.hashCode() +
-			"/" + targetMethod.getName() +
-			argumentsKey;
-		return cacheKey;		
-	}
 }

@@ -32,7 +32,7 @@ import static org.burningwave.core.assembler.StaticComponentContainer.Strings;
 
 
 @SuppressWarnings("unchecked")
-public class Throwables implements Component {
+public class Throwables {
 	
 	public static Throwables create() {
 		return new Throwables();
@@ -63,7 +63,7 @@ public class Throwables implements Component {
 	}
 	
 	
-	private <E extends Throwable> void throwException(Throwable exc) throws E{
+	private <E extends Throwable> void throwException(Throwable exc) throws E {
 		throw (E)exc;
 	}
 	

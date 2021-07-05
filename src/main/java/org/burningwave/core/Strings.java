@@ -28,6 +28,8 @@
  */
 package org.burningwave.core;
 
+import static org.burningwave.core.assembler.StaticComponentContainer.ManagedLoggersRepository;
+
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -44,7 +46,7 @@ import java.util.stream.Collectors;
 
 import org.burningwave.core.function.Executor;
 
-public class Strings implements Component {
+public class Strings implements ManagedLogger {
 	
 	public final Pattern PLACE_HOLDER_NAME_EXTRACTOR_PATTERN = Pattern.compile("\\$\\{([\\w\\d\\.\\:\\-]*)\\}");
 	public final Pattern PLACE_HOLDER_EXTRACTOR_PATTERN = Pattern.compile("(\\$\\{[\\w\\d\\.\\:\\-]*\\})");
@@ -149,7 +151,7 @@ public class Strings implements Component {
 	}	
 	
 	public String replace(String text, Map<String, String> params) {
-		AtomicReference<String> template = new AtomicReference<String>(text);
+		AtomicReference<String> template = new AtomicReference<>(text);
 		params.forEach((key, value) -> 
 			template.set(
 				template.get().replaceAll(
@@ -172,12 +174,12 @@ public class Strings implements Component {
 				try {
 					List<String> foundString = null;
 					if ((foundString = found.get(i)) == null) {
-						foundString = new ArrayList<String>();
+						foundString = new ArrayList<>();
 						found.put(i, foundString);
 					}					
 					foundString.add(matcher.group(i));
 				} catch (IndexOutOfBoundsException exc) {
-					logDebug("group " + i + " not found on string \"" + target + "\" using pattern " + pattern.pattern());
+					ManagedLoggersRepository.logInfo(getClass()::getName, "group " + i + " not found on string \"" + target + "\" using pattern " + pattern.pattern());
 				}
 			}
 		}
@@ -193,7 +195,7 @@ public class Strings implements Component {
 	
 	private String clear(String text) {
 		return text
-		.replace("\\", "\\")
+		.replace("\\", "\\\\\\")
 		.replace("{", "\\{")
 		.replace("}", "\\}")
 		.replace("(", "\\(")

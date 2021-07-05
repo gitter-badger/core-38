@@ -33,6 +33,9 @@ import java.util.Collection;
 import java.util.Optional;
 
 public class BodySourceGenerator extends SourceGenerator.Abst {
+
+	private static final long serialVersionUID = 5923611245424078711L;
+	
 	private Collection<TypeDeclarationSourceGenerator> usedTypes;
 	private String startingDelimiter;
 	private String endingDelimiter;
@@ -43,7 +46,7 @@ public class BodySourceGenerator extends SourceGenerator.Abst {
 	BodySourceGenerator() {}
 	
 	public static BodySourceGenerator create() {
-		return new BodySourceGenerator().setDelimiters("{", "\n}").setElementPrefix("\t");
+		return new BodySourceGenerator().setDelimiters("{\n", "\n}").setElementPrefix("\t");
 	}
 	
 	public static BodySourceGenerator createSimple() {
@@ -66,8 +69,18 @@ public class BodySourceGenerator extends SourceGenerator.Abst {
 		return this;
 	}
 	
+	public BodySourceGenerator setStartingDelimiter(String startingDelimiter) {
+		this.startingDelimiter = startingDelimiter;
+		return this;
+	}
+
+	public BodySourceGenerator setEndingDelimiter(String endingDelimiter) {
+		this.endingDelimiter = endingDelimiter;
+		return this;
+	}
+	
 	public BodySourceGenerator addElement(SourceGenerator... generators) {
-		this.bodyGenerators = Optional.ofNullable(this.bodyGenerators).orElseGet(ArrayList::new);
+		Optional.ofNullable(this.bodyGenerators).orElseGet(() -> this.bodyGenerators = new ArrayList<>());
 		for (SourceGenerator generator : generators) {
 			this.bodyGenerators.add(generator);
 		}
@@ -75,9 +88,12 @@ public class BodySourceGenerator extends SourceGenerator.Abst {
 	}
 	
 	public BodySourceGenerator addCode(String... elements) {
-		this.bodyGenerators = Optional.ofNullable(this.bodyGenerators).orElseGet(ArrayList::new);
+		Optional.ofNullable(this.bodyGenerators).orElseGet(() -> this.bodyGenerators = new ArrayList<>());
 		for (String element : elements) {
 			this.bodyGenerators.add(new SourceGenerator() {
+
+				private static final long serialVersionUID = 5843006583153055991L;
+
 				@Override
 				public String make() {
 					return element;
@@ -86,16 +102,24 @@ public class BodySourceGenerator extends SourceGenerator.Abst {
 		}
 		return this;
 	}
-
+	
+	boolean isEmpty() {
+		return bodyGenerators == null || bodyGenerators.isEmpty();
+	}
+	
 	public BodySourceGenerator addCodeLine(String... codes) {
-		for (String code : codes) {
-			addCode("\n" + Optional.ofNullable(elementPrefix).orElseGet(() -> "") + code);	
+		if (codes.length > 0) {
+			for (String code : codes) {
+				addCode((bodyGenerators != null && !bodyGenerators.isEmpty()? "\n" : "") + code);	
+			}
+		} else {
+			addCode((bodyGenerators != null && !bodyGenerators.isEmpty()? "\n" : ""));
 		}
 		return this;	
 	}
 	
 	public BodySourceGenerator addAllElements(Collection<? extends SourceGenerator> generators) {
-		this.bodyGenerators = Optional.ofNullable(this.bodyGenerators).orElseGet(ArrayList::new);
+		Optional.ofNullable(this.bodyGenerators).orElseGet(() -> this.bodyGenerators = new ArrayList<>());
 		generators.forEach(generator -> {
 			addElement(generator);
 		});
@@ -107,30 +131,62 @@ public class BodySourceGenerator extends SourceGenerator.Abst {
 		Optional.ofNullable(usedTypes).ifPresent(usedTypes -> types.addAll(usedTypes));
 		Optional.ofNullable(bodyGenerators).ifPresent(bodyGenerators -> {
 			for (SourceGenerator generator : bodyGenerators) {
+				if (generator instanceof AnnotationSourceGenerator) {
+					types.addAll(((AnnotationSourceGenerator)generator).getTypeDeclarations());
+				}
 				if (generator instanceof BodySourceGenerator) {
 					types.addAll(((BodySourceGenerator)generator).getTypeDeclarations());
+				}
+				if (generator instanceof ClassSourceGenerator) {
+					types.addAll(((ClassSourceGenerator)generator).getTypeDeclarations());
+				}
+				if (generator instanceof FunctionSourceGenerator) {
+					types.addAll(((FunctionSourceGenerator)generator).getTypeDeclarations());
+				}
+				if (generator instanceof GenericSourceGenerator) {
+					types.addAll(((GenericSourceGenerator)generator).getTypeDeclarations());
+				}
+				if (generator instanceof TypeDeclarationSourceGenerator) {
+					types.addAll(((TypeDeclarationSourceGenerator)generator).getTypeDeclarations());
 				}
 				if (generator instanceof VariableSourceGenerator) {
 					types.addAll(((VariableSourceGenerator)generator).getTypeDeclarations());
 				}
-				if (generator instanceof AnnotationSourceGenerator) {
-					types.addAll(((AnnotationSourceGenerator)generator).getTypeDeclarations());
-				}
+
 			}
 		});
 		return types;
 	}
 	
 	public BodySourceGenerator useType(java.lang.Class<?>... classes) {
-		this.usedTypes = Optional.ofNullable(this.usedTypes).orElseGet(ArrayList::new);
+		Optional.ofNullable(this.usedTypes).orElseGet(() -> this.usedTypes = new ArrayList<>());
 		for (java.lang.Class<?> cls : classes) {			
 			this.usedTypes.add(TypeDeclarationSourceGenerator.create(cls));
 		}
 		return this;		
 	}
 	
+	String getStartingDelimiter() {
+		return startingDelimiter;
+	}
+	
+	String getEndingDelimiter() {
+		return endingDelimiter;
+	}
+	
+	String getBodyCode() {
+		String elementPrefix = !isEmpty()? this.elementPrefix : null;
+		String bodyCode =
+			Optional.ofNullable(elementPrefix).orElseGet(() -> "") +
+			getOrEmpty(bodyGenerators, Optional.ofNullable(elementSeparator).orElse(EMPTY_SPACE))
+			.replaceAll("\n(.)", "\n" + Optional.ofNullable(elementPrefix).orElseGet(() -> "") + "$1");
+		return bodyCode;
+	}
+	
+	
+	
 	public BodySourceGenerator useType(String... classes) {
-		this.usedTypes = Optional.ofNullable(this.usedTypes).orElseGet(ArrayList::new);
+		Optional.ofNullable(this.usedTypes).orElseGet(() -> this.usedTypes = new ArrayList<>());
 		for (String cls : classes) {			
 			this.usedTypes.add(TypeDeclarationSourceGenerator.create(cls, null));
 		}
@@ -139,7 +195,7 @@ public class BodySourceGenerator extends SourceGenerator.Abst {
 	
 	@Override
 	public String make() {
-		return getOrEmpty(startingDelimiter, getOrEmpty(bodyGenerators, Optional.ofNullable(elementSeparator).orElse(EMPTY_SPACE)), endingDelimiter);
+		return getOrEmpty(startingDelimiter, getBodyCode(), endingDelimiter);
 	}
 	
 }

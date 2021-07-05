@@ -32,16 +32,18 @@ import static org.burningwave.core.assembler.StaticComponentContainer.Cache;
 import static org.burningwave.core.assembler.StaticComponentContainer.Classes;
 import static org.burningwave.core.assembler.StaticComponentContainer.Fields;
 import static org.burningwave.core.assembler.StaticComponentContainer.LowLevelObjectsHandler;
-import static org.burningwave.core.assembler.StaticComponentContainer.Members;
+import static org.burningwave.core.assembler.StaticComponentContainer.ManagedLoggersRepository;
 import static org.burningwave.core.assembler.StaticComponentContainer.Methods;
+import static org.burningwave.core.assembler.StaticComponentContainer.Objects;
 import static org.burningwave.core.assembler.StaticComponentContainer.Paths;
 import static org.burningwave.core.assembler.StaticComponentContainer.Streams;
+import static org.burningwave.core.assembler.StaticComponentContainer.Strings;
 import static org.burningwave.core.assembler.StaticComponentContainer.Synchronizer;
 import static org.burningwave.core.assembler.StaticComponentContainer.Throwables;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.lang.invoke.MethodHandle;
-import java.lang.reflect.AccessibleObject;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
@@ -52,6 +54,7 @@ import java.nio.ByteBuffer;
 import java.security.ProtectionDomain;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -63,14 +66,15 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
-import org.burningwave.core.Component;
+import org.burningwave.core.Closeable;
 import org.burningwave.core.assembler.StaticComponentContainer;
 import org.burningwave.core.function.Executor;
 import org.burningwave.core.io.FileSystemItem;
 
 @SuppressWarnings("unchecked")
-public class Classes implements Component, MembersRetriever {
+public class Classes implements MembersRetriever {
 	public static class Symbol{
 		public static class Tag {
 			static final byte UTF8 = 1;
@@ -346,10 +350,6 @@ public class Classes implements Component, MembersRetriever {
 			() -> LowLevelObjectsHandler.getDeclaredMethods(cls)
 		);
 	}	
-
-	public void setAccessible(AccessibleObject object, boolean flag) {
-		LowLevelObjectsHandler.setAccessible(object, flag);
-	}
 	
 	public boolean isLoadedBy(Class<?> cls, ClassLoader classLoader) {
 		if (cls.getClassLoader() == classLoader) {
@@ -386,7 +386,7 @@ public class Classes implements Component, MembersRetriever {
 		return cls;
 	}
 	
-	public static class Loaders implements Component {
+	public static class Loaders implements Closeable {
 		protected Map<ClassLoader, Collection<Class<?>>> classLoadersClasses;
 		protected Map<ClassLoader, Map<String, ?>> classLoadersPackages;
 		protected Map<String, MethodHandle> classLoadersMethods;
@@ -447,7 +447,7 @@ public class Classes implements Component, MembersRetriever {
 		}	
 		
 		private MethodHandle findDefinePackageMethodAndMakeItAccesible(ClassLoader classLoader) {
-			Method method = Members.findAll(
+			return Methods.findFirstDirectHandle(
 				MethodCriteria.byScanUpTo((cls) -> 
 					cls.getName().equals(ClassLoader.class.getName())
 				).name(
@@ -455,10 +455,8 @@ public class Classes implements Component, MembersRetriever {
 				).and().parameterTypesAreAssignableFrom(
 					String.class, String.class, String.class, String.class,
 					String.class, String.class, String.class, URL.class
-				),
-				classLoader.getClass()
-			).stream().findFirst().orElse(null);
-			return Methods.convertToMethodHandleBag(method).getValue();
+				), classLoader.getClass()
+			);
 		}
 		
 		public MethodHandle getDefineClassMethod(ClassLoader classLoader) {
@@ -484,7 +482,7 @@ public class Classes implements Component, MembersRetriever {
 		}
 		
 		private MethodHandle findDefineClassMethodAndMakeItAccesible(ClassLoader classLoader) {
-			Method method = Members.findAll(
+			return Methods.findFirstDirectHandle(
 				MethodCriteria.byScanUpTo((cls) -> cls.getName().equals(ClassLoader.class.getName())).name(
 					(classLoader instanceof MemoryClassLoader? "_defineClass" : "defineClass")::equals
 				).and().parameterTypes(params -> 
@@ -493,12 +491,11 @@ public class Classes implements Component, MembersRetriever {
 					String.class, ByteBuffer.class, ProtectionDomain.class
 				).and().returnType((cls) -> cls.getName().equals(Class.class.getName())),
 				classLoader.getClass()
-			).stream().findFirst().orElse(null);
-			return Methods.convertToMethodHandleBag(method).getValue();
+			);
 		}
 		
 		private MethodHandle findGetClassLoadingLockMethodAndMakeItAccesible(ClassLoader classLoader) {
-			Method method = Members.findAll(
+			return Methods.findFirstDirectHandle(
 				MethodCriteria.byScanUpTo((cls) -> cls.getName().equals(ClassLoader.class.getName())).name(
 					"getClassLoadingLock"::equals
 				).and().parameterTypes(params -> 
@@ -507,8 +504,7 @@ public class Classes implements Component, MembersRetriever {
 					String.class
 				),
 				classLoader.getClass()
-			).stream().findFirst().orElse(null);
-			return Methods.convertToMethodHandleBag(method).getValue();
+			);
 		}
 		
 		private MethodHandle getMethod(String key, Supplier<MethodHandle> methodSupplier) {
@@ -540,7 +536,7 @@ public class Classes implements Component, MembersRetriever {
 					}
 				}
 			}
-			logWarn("'classes' collection has not been initialized on {}: trying recursive call", classLoader);
+			ManagedLoggersRepository.logWarn(getClass()::getName, "'classes' collection has not been initialized on {}: trying recursive call", classLoader);
 			return retrieveLoadedClasses(classLoader);
 		}
 		
@@ -729,7 +725,7 @@ public class Classes implements Component, MembersRetriever {
 			} catch (InvocationTargetException | ClassNotFoundException | NoClassDefFoundError exc) {
 				throw exc;
 			} catch (java.lang.LinkageError exc) {
-				logWarn("Class {} is already defined", className);
+				ManagedLoggersRepository.logWarn(getClass()::getName, "Class {} is already defined", className);
 				return (Class<T>)classLoader.loadClass(className);
 			} catch (Throwable exc) {
 				if (byteCode == null) {
@@ -751,7 +747,7 @@ public class Classes implements Component, MembersRetriever {
 	    			return (Package) definePackageMethod.invoke(classLoader, name, specTitle, specVersion, specVendor, implTitle,
 	    				implVersion, implVendor, sealBase);
 	    		} catch (IllegalArgumentException exc) {
-	    			logWarn("Package " + name + " already defined");
+	    			ManagedLoggersRepository.logWarn(getClass()::getName, "Package " + name + " already defined");
 	    			return retrieveLoadedPackage(classLoader, name);
 	    		}
 			});
@@ -861,8 +857,18 @@ public class Classes implements Component, MembersRetriever {
 		}
 		
 		public Collection<String> addClassPaths(ClassLoader classLoader, Predicate<String> checkForAddedClasses, Collection<String>... classPathCollections) {
+			if (!(classLoader instanceof URLClassLoader || isBuiltinClassLoader(classLoader) || classLoader instanceof PathScannerClassLoader)) {
+				if (!isItPossibleToAddClassPaths(classLoader)) {
+					throw new UnsupportedException(
+						Strings.compile("Could not add class paths to {} because the type {} is not supported",
+								Objects.getId(classLoader), classLoader.getClass())
+					);
+				} else {
+					return addClassPaths(getParent(classLoader), checkForAddedClasses, classPathCollections);
+				}
+			}
 			if (LowLevelObjectsHandler.isClassLoaderDelegate(classLoader)) {
-				return addClassPaths(Fields.getDirect(classLoader, "classLoader"));
+				return addClassPaths(Fields.getDirect(classLoader, "classLoader"), checkForAddedClasses, classPathCollections);
 			}
 			Collection<String> paths = new HashSet<>();
 			for (Collection<String> classPaths : classPathCollections) {
@@ -889,28 +895,31 @@ public class Classes implements Component, MembersRetriever {
 		}
 		
 		public Collection<String> addClassPaths(ClassLoader classLoader, Collection<String>... classPathCollections) {
-			return addClassPaths(classLoader, (path) -> false, classPathCollections);
-		}
-
-		public Collection<String> getAllLoadedPaths(ClassLoader classLoader) {
-			return getAllLoadedPaths(classLoader, true);
+			return addClassPaths(classLoader, (path) -> true, classPathCollections);
 		}
 		
-		public Collection<String> getAllLoadedPaths(ClassLoader classLoader, boolean considerThePathsLoadedByURLClassLoaderPathsAndBuiltinClassLoaderAsLoadeded) {
-			Collection<String> allLoadedPaths = new LinkedHashSet<>();
-			while((classLoader = getParent(classLoader)) != null) {
-				if (classLoader instanceof PathScannerClassLoader) {
-					allLoadedPaths.addAll(((PathScannerClassLoader)classLoader).loadedPaths);
-				} else if (considerThePathsLoadedByURLClassLoaderPathsAndBuiltinClassLoaderAsLoadeded) {
-					URL[] resUrl = getURLs(classLoader);
-					if (resUrl != null) {
-						for (int i = 0; i < resUrl.length; i++) {
-							allLoadedPaths.add(Paths.convertURLPathToAbsolutePath(resUrl[i].getPath()));
-						}
+		public Collection<String> getLoadedPaths(ClassLoader classLoader) {
+			Collection<String> paths = new LinkedHashSet<>();
+			if (classLoader instanceof PathScannerClassLoader) {
+				paths.addAll(((PathScannerClassLoader)classLoader).loadedPaths);
+			} else {
+				URL[] resUrl = getURLs(classLoader);
+				if (resUrl != null) {
+					for (int i = 0; i < resUrl.length; i++) {
+						paths.add(Paths.convertURLPathToAbsolutePath(resUrl[i].getPath()));
 					}
 				}
 			}
-			return allLoadedPaths;
+			return paths;
+		}
+		
+		public Collection<String> getAllLoadedPaths(ClassLoader classLoader) {
+			Collection<String> paths = new LinkedHashSet<>();
+			while(classLoader != null) {
+				paths.addAll(getLoadedPaths(classLoader));
+				classLoader = getParent(classLoader);
+			}
+			return paths;
 		}
 		
 		public boolean isBuiltinClassLoader(ClassLoader classLoader) {
@@ -933,6 +942,30 @@ public class Classes implements Component, MembersRetriever {
 			return null;
 		}
 		
+		@SafeVarargs
+		public final Collection<FileSystemItem> getResources(ClassLoader classLoader, String... paths) {
+			return getResources(classLoader, Arrays.asList(paths)); 
+		}	
+		
+		@SafeVarargs
+		public final Collection<FileSystemItem> getResources(ClassLoader classLoader, Collection<String>... pathCollections) {
+			Collection<FileSystemItem> paths = new HashSet<>();
+			for (Collection<String> pathCollection : pathCollections) {
+				for (String path : pathCollection) {
+					try {
+						paths.addAll(
+							Collections.list(classLoader.getResources(path)).stream().map(url ->
+								FileSystemItem.of(url)
+							).collect(Collectors.toSet())
+						);
+					} catch (IOException exc) {
+						Throwables.throwException(exc);
+					}
+				}
+			}
+			return paths;
+		}
+		
 		public void unregister(ClassLoader classLoader) {
 			classLoadersClasses.remove(classLoader);
 			classLoadersPackages.remove(classLoader);
@@ -951,6 +984,19 @@ public class Classes implements Component, MembersRetriever {
 				Throwables.throwException("Could not close singleton instance {}", this);
 			}
 		}
+		
+		public static class UnsupportedException extends RuntimeException {
+			
+			private static final long serialVersionUID = 8964839983768809586L;
+
+			public UnsupportedException(String s) {
+				super(s);
+			}
+			
+			public UnsupportedException(String s, Throwable cause) {
+				super(s, cause);
+			}
+		}	
 	}
 
 }

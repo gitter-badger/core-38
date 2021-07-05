@@ -34,7 +34,11 @@ import java.util.Collection;
 import java.util.Optional;
 
 public class VariableSourceGenerator extends SourceGenerator.Abst {
+
+	private static final long serialVersionUID = -1218339549136277345L;
+	
 	private Collection<String> outerCode;
+	private String elementPrefix;
 	private Collection<AnnotationSourceGenerator> annotations;
 	private String assignmentOperator;
 	private String delimiter;
@@ -59,8 +63,17 @@ public class VariableSourceGenerator extends SourceGenerator.Abst {
 		return new VariableSourceGenerator(type, name);
 	}
 	
+	public static VariableSourceGenerator create(TypeDeclarationSourceGenerator type) {
+		return new VariableSourceGenerator(type, null);
+	}
+	
 	public static VariableSourceGenerator create(String name) {
 		return new VariableSourceGenerator(null, name);
+	}
+	
+	public VariableSourceGenerator setElementPrefix(String elementPrefix) {
+		this.elementPrefix = elementPrefix;
+		return this;
 	}
 	
 	public VariableSourceGenerator addModifier(Integer modifier) {
@@ -73,13 +86,12 @@ public class VariableSourceGenerator extends SourceGenerator.Abst {
 	}
 	
 	public VariableSourceGenerator addOuterCode(String code) {
-		this.outerCode = Optional.ofNullable(this.outerCode).orElseGet(ArrayList::new);
-		this.outerCode.add(code);
+		Optional.ofNullable(this.outerCode).orElseGet(() -> this.outerCode = new ArrayList<>()).add(code);
 		return this;
 	}
 	
 	public VariableSourceGenerator addOuterCodeLine(String code) {
-		this.outerCode = Optional.ofNullable(this.outerCode).orElseGet(ArrayList::new);
+		Optional.ofNullable(this.outerCode).orElseGet(() -> this.outerCode = new ArrayList<>());
 		if (!this.outerCode.isEmpty()) {
 			this.outerCode.add("\n" + code);
 		} else {
@@ -89,8 +101,7 @@ public class VariableSourceGenerator extends SourceGenerator.Abst {
 	}
 	
 	public VariableSourceGenerator addAnnotation(AnnotationSourceGenerator annotation) {
-		this.annotations = Optional.ofNullable(this.annotations).orElseGet(ArrayList::new);
-		this.annotations.add(annotation);
+		Optional.ofNullable(this.annotations).orElseGet(() -> this.annotations = new ArrayList<>()).add(annotation);
 		return this;
 	}
 	
@@ -133,7 +144,7 @@ public class VariableSourceGenerator extends SourceGenerator.Abst {
 	}
 	
 	public VariableSourceGenerator useType(java.lang.Class<?>... classes) {
-		this.usedTypes = Optional.ofNullable(this.usedTypes).orElseGet(ArrayList::new);
+		Optional.ofNullable(this.usedTypes).orElseGet(() -> this.usedTypes = new ArrayList<>());
 		for (java.lang.Class<?> cls : classes) {			
 			this.usedTypes.add(TypeDeclarationSourceGenerator.create(cls));
 		}
@@ -146,7 +157,7 @@ public class VariableSourceGenerator extends SourceGenerator.Abst {
 	
 	@Override
 	public String make() {
-		return getOrEmpty(
+		String bodyCode = Optional.ofNullable(elementPrefix).orElseGet(() -> "") + getOrEmpty(
 			Optional.ofNullable(outerCode).map(oc -> 
 				getOrEmpty(outerCode) + "\n"
 			).orElseGet(() -> null),
@@ -156,5 +167,9 @@ public class VariableSourceGenerator extends SourceGenerator.Abst {
 			name,
 			Optional.ofNullable(valueBody).map(value -> assignmentOperator + value).orElseGet(() -> null)
 		) + Optional.ofNullable(delimiter).orElseGet(() -> "");
+		if (elementPrefix != null) {
+			bodyCode = bodyCode.replaceAll("\n(.)", "\n" + elementPrefix + "$1");
+		}
+		return bodyCode;
 	}
 }

@@ -36,12 +36,13 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 import org.burningwave.core.Virtual;
+import org.burningwave.core.classes.JavaMemoryCompiler.Compilation;
 
 @SuppressWarnings("unchecked")
 class LoadOrBuildAndDefineConfigAbst<L extends LoadOrBuildAndDefineConfigAbst<L>> {
 	
 	Collection<UnitSourceGenerator> unitSourceGenerators;
-	private Function<CompilationConfig, CompilationConfig> compilationConfigSupplier;
+	private Function<Compilation.Config, Compilation.Config> compilationConfigSupplier;
 	private Collection<String> classRepositoriesWhereToSearchNotFoundClassesDuringLoading;
 	private Collection<String> additionalClassRepositoriesWhereToSearchNotFoundClassesDuringLoading;
 	
@@ -61,16 +62,14 @@ class LoadOrBuildAndDefineConfigAbst<L extends LoadOrBuildAndDefineConfigAbst<L>
 			unitSourceGenerators.addAll(unitsCode);
 		}
 		compilationConfigSupplier = (compileConfig) -> {
-			Collection<String> sources = new HashSet<>();
 			for (UnitSourceGenerator unitCode : this.unitSourceGenerators) {
 				unitCode.getAllClasses().entrySet().forEach(entry -> {
 					if (virtualizeClasses) {
 						entry.getValue().addConcretizedType(TypeDeclarationSourceGenerator.create(Virtual.class));
 					}
 				});
-				sources.add(unitCode.make());
 			}
-			return CompilationConfig.withSources(sources);
+			return Compilation.Config.forUnitSourceGenerators(unitSourceGenerators);
 		};
 	}
 	
@@ -79,7 +78,7 @@ class LoadOrBuildAndDefineConfigAbst<L extends LoadOrBuildAndDefineConfigAbst<L>
 		return (L)this;
 	}
 	
-	public L modifyCompilationConfig(Consumer<CompilationConfig> compilationConfigModifier) {
+	public L modifyCompilationConfig(Consumer<Compilation.Config> compilationConfigModifier) {
 		compilationConfigSupplier = compilationConfigSupplier.andThen((compileConfig) -> {
 			compilationConfigModifier.accept(compileConfig);
 			return compileConfig;
@@ -245,7 +244,7 @@ class LoadOrBuildAndDefineConfigAbst<L extends LoadOrBuildAndDefineConfigAbst<L>
 		return classesName;
 	}
 	
-	Supplier<CompilationConfig> getCompileConfigSupplier() {
+	Supplier<Compilation.Config> getCompileConfigSupplier() {
 		return () -> compilationConfigSupplier.apply(null);
 	}
 	

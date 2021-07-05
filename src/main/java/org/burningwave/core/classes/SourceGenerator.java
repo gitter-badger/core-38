@@ -27,7 +27,11 @@
  * OR OTHER DEALINGS IN THE SOFTWARE.
  */
 package org.burningwave.core.classes;
+import static org.burningwave.core.assembler.StaticComponentContainer.Objects;
 
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -35,9 +39,9 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.Optional;
 
-import org.burningwave.core.ManagedLogger;
+import org.burningwave.core.io.FileSystemItem;
 
-public interface SourceGenerator extends ManagedLogger {
+public interface SourceGenerator extends Serializable {
 	
 	public String make();
 	
@@ -45,7 +49,27 @@ public interface SourceGenerator extends ManagedLogger {
 		return make();
 	}
 	
-	public static abstract class Abst implements SourceGenerator {
+	public default FileSystemItem serializeToPath(String absolutePath) { 
+		return Objects.serializeToPath(this, absolutePath);
+	}
+	
+	public static <S extends SourceGenerator> S deserializeFromPath(String absolutePath) { 
+		return Objects.deserializeFromPath(absolutePath);
+	}
+		
+	public default void serialize(OutputStream outputStream) {
+		Objects.serialize(this, outputStream);
+	}
+	
+	@SuppressWarnings("unchecked")
+	public static <S extends SourceGenerator> S deserialize(InputStream inputStream) {
+		return (S)Objects.deserialize(inputStream);
+	}
+	
+	static abstract class Abst implements SourceGenerator {
+
+		private static final long serialVersionUID = -6189371616365377165L;
+		
 		static final String EMPTY_SPACE = " ";
 		static final String COMMA = ",";
 		static final String SEMICOLON = ";";

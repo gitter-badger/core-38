@@ -56,27 +56,28 @@ import java.util.function.Supplier;
 
 import org.burningwave.core.Component;
 import org.burningwave.core.Executable;
+import org.burningwave.core.ManagedLogger;
 import org.burningwave.core.classes.ByteCodeHunter;
 import org.burningwave.core.classes.ClassFactory;
 import org.burningwave.core.classes.ClassHunter;
 import org.burningwave.core.classes.ClassPathHelper;
 import org.burningwave.core.classes.ClassPathHunter;
-import org.burningwave.core.classes.ClassPathScannerAbst;
+import org.burningwave.core.classes.ClassPathScanner;
 import org.burningwave.core.classes.CodeExecutor;
 import org.burningwave.core.classes.ExecuteConfig;
 import org.burningwave.core.classes.FunctionalInterfaceFactory;
 import org.burningwave.core.classes.JavaMemoryCompiler;
-import org.burningwave.core.classes.PathScannerClassLoader;
 import org.burningwave.core.classes.SearchResult;
 import org.burningwave.core.concurrent.QueuedTasksExecutor;
 import org.burningwave.core.function.ThrowingRunnable;
 import org.burningwave.core.io.FileSystemItem;
+import org.burningwave.core.io.FileSystemItem.Criteria;
 import org.burningwave.core.io.PathHelper;
 import org.burningwave.core.iterable.Properties;
 import org.burningwave.core.iterable.Properties.Event;
 
 @SuppressWarnings({"unchecked", "resource"})
-public class ComponentContainer implements ComponentSupplier {
+public class ComponentContainer implements ComponentSupplier, Properties.Listener, ManagedLogger {
 	
 	public static class Configuration {
 		
@@ -91,15 +92,15 @@ public class ComponentContainer implements ComponentSupplier {
 		static {
 			Map<String, Object> defaultValues = new HashMap<>();
 
-			defaultValues.put(Configuration.Key.AFTER_INIT + CodeExecutor.Configuration.Key.PROPERTIES_FILE_CODE_EXECUTOR_IMPORTS_SUFFIX,
+			defaultValues.put(Configuration.Key.AFTER_INIT + CodeExecutor.Configuration.Key.PROPERTIES_FILE_IMPORTS_SUFFIX,
 				"${"+ CodeExecutor.Configuration.Key.COMMON_IMPORTS + "}" + CodeExecutor.Configuration.Value.CODE_LINE_SEPARATOR + 
 				"${"+ Configuration.Key.AFTER_INIT + ".additional-imports}" + CodeExecutor.Configuration.Value.CODE_LINE_SEPARATOR +
 				Arrays.class.getName() + CodeExecutor.Configuration.Value.CODE_LINE_SEPARATOR + 
 				SearchResult.class.getName() + CodeExecutor.Configuration.Value.CODE_LINE_SEPARATOR
 			);
 			defaultValues.put(
-				Configuration.Key.AFTER_INIT + CodeExecutor.Configuration.Key.PROPERTIES_FILE_CODE_EXECUTOR_NAME_SUFFIX, 
-				ComponentContainer.class.getPackage().getName() + ".AfterInitOperations"
+				Configuration.Key.AFTER_INIT + CodeExecutor.Configuration.Key.PROPERTIES_FILE_EXECUTOR_NAME_SUFFIX, 
+				ComponentContainer.class.getPackage().getName() + ".AfterInitOperationsExecutor"
 			);
 			
 			DEFAULT_VALUES = Collections.unmodifiableMap(defaultValues);
@@ -107,7 +108,7 @@ public class ComponentContainer implements ComponentSupplier {
 	}
 	
 	private static Collection<ComponentContainer> instances;
-	private Map<Class<? extends Component>, Component> components;
+	private Map<Class<?>, Component> components;
 	private Supplier<java.util.Properties> propertySupplier;
 	private Properties config;
 	private boolean isUndestroyable;
@@ -172,8 +173,10 @@ public class ComponentContainer implements ComponentSupplier {
 		defaultProperties.putAll(PathHelper.Configuration.DEFAULT_VALUES);
 		defaultProperties.putAll(JavaMemoryCompiler.Configuration.DEFAULT_VALUES);
 		defaultProperties.putAll(ClassFactory.Configuration.DEFAULT_VALUES);
+		defaultProperties.putAll(ByteCodeHunter.Configuration.DEFAULT_VALUES);
 		defaultProperties.putAll(ClassHunter.Configuration.DEFAULT_VALUES);
-		defaultProperties.putAll(ClassPathScannerAbst.Configuration.DEFAULT_VALUES);
+		defaultProperties.putAll(ClassPathHunter.Configuration.DEFAULT_VALUES);
+		defaultProperties.putAll(ClassPathScanner.Configuration.DEFAULT_VALUES);
 		defaultProperties.putAll(ClassPathHelper.Configuration.DEFAULT_VALUES);
 		defaultProperties.putAll(PathScannerClassLoader.Configuration.DEFAULT_VALUES);
 				
@@ -220,7 +223,7 @@ public class ComponentContainer implements ComponentSupplier {
 		Properties componentContainerConfig = new Properties();
 		componentContainerConfig.putAll(this.config);
 		componentContainerConfig.keySet().removeAll(GlobalProperties.keySet());
-		logInfo(
+		ManagedLoggersRepository.logInfo(getClass()::getName,
 			"\n\n\tConfiguration values for dynamic components:\n\n{}\n\n",
 			componentContainerConfig.toPrettyString(2)
 		);
@@ -248,8 +251,7 @@ public class ComponentContainer implements ComponentSupplier {
 						if (pathScannerClassLoader != null) {
 							ClassLoaders.setAsParent(pathScannerClassLoader, resolveProperty(
 								this.config,
-								PathScannerClassLoader.Configuration.Key.PARENT_CLASS_LOADER,
-								PathScannerClassLoader.Configuration.DEFAULT_VALUES
+								PathScannerClassLoader.Configuration.Key.PARENT_CLASS_LOADER
 							));
 						}
 					} else if (keyAsString.equals(PathScannerClassLoader.Configuration.Key.SEARCH_CONFIG_CHECK_FILE_OPTION)) {
@@ -303,18 +305,18 @@ public class ComponentContainer implements ComponentSupplier {
 	}
 	
 	@Override
-	public<T extends Component> T getOrCreate(Class<T> componentType, Supplier<T> componentSupplier) {
-		T component = (T)components.get(componentType);
+	public <I, T extends Component> T getOrCreate(Class<I> cls, Supplier<I> componentSupplier) {
+		T component = (T)components.get(cls);
 		if (component == null) {
 			component = Synchronizer.execute(getMutexForComponentsId(), () -> {
-				T componentTemp = (T)components.get(componentType);
+				T componentTemp = (T)components.get(cls);
 				if (componentTemp == null) {
 					QueuedTasksExecutor.Task afterInitTask = this.afterInitTask;
 					if (afterInitTask != null) {
 						this.afterInitTask = null;
 						afterInitTask.submit();
 					}
-					components.put(componentType, componentTemp = componentSupplier.get());
+					components.put(cls, componentTemp = (T)componentSupplier.get());
 				}
 				return componentTemp;
 			});
@@ -325,22 +327,28 @@ public class ComponentContainer implements ComponentSupplier {
 	@Override
 	public PathScannerClassLoader getPathScannerClassLoader() {
 		return getOrCreate(PathScannerClassLoader.class, () -> {
-				PathScannerClassLoader classLoader = PathScannerClassLoader.create(
-					resolveProperty(
-						this.config,
-						PathScannerClassLoader.Configuration.Key.PARENT_CLASS_LOADER,
-						PathScannerClassLoader.Configuration.DEFAULT_VALUES
-					), getPathHelper(),
-					FileSystemItem.Criteria.forClassTypeFiles(
-						config.resolveStringValue(
-							PathScannerClassLoader.Configuration.Key.SEARCH_CONFIG_CHECK_FILE_OPTION
-						)
+			PathScannerClassLoader classLoader = new ComponentContainer.PathScannerClassLoader(
+				resolveProperty(
+					this.config,
+					PathScannerClassLoader.Configuration.Key.PARENT_CLASS_LOADER
+				), getPathHelper(),
+				FileSystemItem.Criteria.forClassTypeFiles(
+					config.resolveStringValue(
+						PathScannerClassLoader.Configuration.Key.SEARCH_CONFIG_CHECK_FILE_OPTION
 					)
-				);
-				classLoader.register(this);
-				return classLoader;
-			}
-		);
+				),
+				() -> {
+					Synchronizer.execute(getMutexForComponentsId(), () -> {
+						PathScannerClassLoader cL = (PathScannerClassLoader)components.remove(PathScannerClassLoader.class);
+						if (cL != null) {
+							cL.unregister(this, true);
+						}
+					});
+				}
+			);
+			classLoader.register(this);
+			return classLoader;
+		});
 	}
 	
 	@Override
@@ -352,8 +360,9 @@ public class ComponentContainer implements ComponentSupplier {
 				getJavaMemoryCompiler(),
 				getPathHelper(),
 				getClassPathHelper(),
-				(Supplier<?>)() -> resolveProperty(this.config, ClassFactory.Configuration.Key.DEFAULT_CLASS_LOADER, ClassFactory.Configuration.DEFAULT_VALUES),
-				getClassLoaderResetter(),
+				(Supplier<?>)() -> resolveProperty(
+					this.config, ClassFactory.Configuration.Key.DEFAULT_CLASS_LOADER
+				),
 				config
 			)
 		);	
@@ -375,7 +384,8 @@ public class ComponentContainer implements ComponentSupplier {
 		return getOrCreate(JavaMemoryCompiler.class, () ->
 			JavaMemoryCompiler.create(
 				getPathHelper(),
-				getClassPathHelper()
+				getClassPathHelper(),
+				config
 			)
 		);
 	}
@@ -384,10 +394,11 @@ public class ComponentContainer implements ComponentSupplier {
 	public ClassHunter getClassHunter() {
 		return getOrCreate(ClassHunter.class, () -> {
 			return ClassHunter.create(
-				() -> getClassHunter(),
 				getPathHelper(),
-				(Supplier<?>)() -> resolveProperty(this.config, ClassHunter.Configuration.Key.DEFAULT_PATH_SCANNER_CLASS_LOADER, ClassHunter.Configuration.DEFAULT_VALUES),
-				getClassLoaderResetter(),
+				(Supplier<?>)() -> resolveProperty(
+					this.config,
+					ClassHunter.Configuration.Key.DEFAULT_PATH_SCANNER_CLASS_LOADER
+				),
 				config
 			);
 		});
@@ -407,8 +418,11 @@ public class ComponentContainer implements ComponentSupplier {
 	public ClassPathHunter getClassPathHunter() {
 		return getOrCreate(ClassPathHunter.class, () -> 
 			ClassPathHunter.create(
-				() -> getClassHunter(),
 				getPathHelper(),
+				(Supplier<?>)() -> resolveProperty(
+					this.config,
+					ClassPathHunter.Configuration.Key.DEFAULT_PATH_SCANNER_CLASS_LOADER
+				),
 				config
 			)
 		);
@@ -418,8 +432,11 @@ public class ComponentContainer implements ComponentSupplier {
 	public ByteCodeHunter getByteCodeHunter() {
 		return getOrCreate(ByteCodeHunter.class, () -> 
 			ByteCodeHunter.create(
-				() -> getClassHunter(),
 				getPathHelper(),
+				(Supplier<?>)() -> resolveProperty(
+					this.config,
+					ByteCodeHunter.Configuration.Key.DEFAULT_PATH_SCANNER_CLASS_LOADER
+				),
 				config
 			)
 		);
@@ -468,18 +485,9 @@ public class ComponentContainer implements ComponentSupplier {
 		}
 	}
 	
-	private Consumer<ClassLoader> getClassLoaderResetter() {
-		return classLoader -> {
-			PathScannerClassLoader pathScannerClassLoader = (PathScannerClassLoader)components.get(PathScannerClassLoader.class);
-			if (classLoader == pathScannerClassLoader) {
-				resetPathScannerClassLoader();
-			}
-		};
-	}
-	
 	@Override
 	public ComponentContainer clear() {
-		Map<Class<? extends Component>, Component> components = this.components;
+		Map<Class<?>, Component> components = this.components;
 		Synchronizer.execute(getMutexForComponentsId(), () -> { 
 			this.components = new ConcurrentHashMap<>();
 		});
@@ -493,7 +501,7 @@ public class ComponentContainer implements ComponentSupplier {
 							((PathScannerClassLoader)component).unregister(this, true);
 						}					
 					} catch (Throwable exc) {
-						logError("Exception occurred while closing " + component, exc);
+						ManagedLoggersRepository.logError(getClass()::getName,"Exception occurred while closing " + component, exc);
 					}
 				}),Thread.MIN_PRIORITY
 			).submit();
@@ -514,8 +522,8 @@ public class ComponentContainer implements ComponentSupplier {
 	
 	void close(boolean force) {
 		if (force || !isUndestroyable) {
-			closeResources(() -> !instances.contains(this),  () -> {
-				instances.remove(this);
+			instances.remove(this);
+			closeResources(() -> instanceId == null,  () -> {
 				unregister(GlobalProperties);
 				unregister(config);
 				clear();			
@@ -587,15 +595,7 @@ public class ComponentContainer implements ComponentSupplier {
 			classPathHunter.clearCache(closeHuntersResults);
 		}
 	}
-	
-	private void resetPathScannerClassLoader() {
-		Synchronizer.execute(getMutexForComponentsId(), () -> {
-			PathScannerClassLoader classLoader = (PathScannerClassLoader)components.remove(PathScannerClassLoader.class);
-			if (classLoader != null) {
-				classLoader.unregister(this, true);
-			}
-		});
-	}
+
 	
 	private static class LazyHolder {
 		private static final ComponentContainer COMPONENT_CONTAINER_INSTANCE = ComponentContainer.create("burningwave.properties").markAsUndestroyable();
@@ -607,5 +607,25 @@ public class ComponentContainer implements ComponentSupplier {
 
 	public boolean isClosed() {
 		return !instances.contains(this);
+	}
+	
+	
+	public static class PathScannerClassLoader extends org.burningwave.core.classes.PathScannerClassLoader {
+		
+		static {
+	        ClassLoader.registerAsParallelCapable();
+	    }
+		
+		Runnable markAsCloseableAlgorithm;
+		PathScannerClassLoader(ClassLoader parentClassLoader, PathHelper pathHelper,
+			Criteria scanFileCriteria, Runnable markAsCloseableAlgorithm
+		) {
+			super(parentClassLoader, pathHelper, scanFileCriteria);
+			this.markAsCloseableAlgorithm = markAsCloseableAlgorithm;
+		}
+		
+		public void markAsCloseable() {
+			markAsCloseableAlgorithm.run();
+		}
 	}
 }

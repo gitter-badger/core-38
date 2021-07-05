@@ -28,28 +28,36 @@
  */
 package org.burningwave.core.classes;
 
+import static org.burningwave.core.assembler.StaticComponentContainer.ClassLoaders;
 import static org.burningwave.core.assembler.StaticComponentContainer.Throwables;
 
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.function.BiConsumer;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
+import org.burningwave.core.Closeable;
 import org.burningwave.core.ManagedLogger;
 import org.burningwave.core.io.FileSystemItem;
 
 @SuppressWarnings("unchecked")
-abstract class SearchConfigAbst<S extends SearchConfigAbst<S>> implements AutoCloseable, ManagedLogger {
+abstract class SearchConfigAbst<S extends SearchConfigAbst<S>> implements Closeable, ManagedLogger {
 	
 	ClassCriteria classCriteria;
 	Collection<String> paths;
+	BiConsumer<ClassLoader, Collection<String>> resourceSupplier;
 	ClassLoader parentClassLoaderForPathScannerClassLoader;
-	FileSystemItem.Criteria scanFileCriteria;
+	Supplier<FileSystemItem.Criteria> defaultScanFileCriteriaSupplier;
+	Supplier<FileSystemItem.Criteria> scanFileCriteriaSupplier;
 	boolean optimizePaths;
 	boolean useDefaultPathScannerClassLoader;
 	boolean useDefaultPathScannerClassLoaderAsParent;
 	boolean waitForSearchEnding;
 	protected Predicate<String> checkForAddedClassesForAllPathThat;
+	protected FileSystemItem.Criteria scanFileCriteriaModifier;
 	
 
 	SearchConfigAbst(Collection<String>... pathsColl) {
@@ -58,7 +66,6 @@ abstract class SearchConfigAbst<S extends SearchConfigAbst<S>> implements AutoCl
 		paths = new HashSet<>();
 		addPaths(pathsColl);
 		classCriteria = ClassCriteria.create();
-		scanFileCriteria = FileSystemItem.Criteria.create();
 		checkForAddedClassesForAllPathThat = (path) -> false;
 	}
 	
@@ -78,6 +85,38 @@ abstract class SearchConfigAbst<S extends SearchConfigAbst<S>> implements AutoCl
 		return addPaths(Arrays.asList(paths));
 	}
 	
+	@SafeVarargs
+	public final S addResources(ClassLoader classLoader, Collection<String>... pathColls) {
+		if (classLoader == null) {
+			if (resourceSupplier == null) {
+				resourceSupplier = (cl, paths) -> {
+					paths.addAll((ClassLoaders.getResources(cl, pathColls).stream().map(file -> file.getAbsolutePath()).collect(Collectors.toSet())));
+				};
+			} else {
+				resourceSupplier = resourceSupplier.andThen((cl, paths) -> {
+					paths.addAll((ClassLoaders.getResources(cl, pathColls).stream().map(file -> file.getAbsolutePath()).collect(Collectors.toSet())));
+				});
+			}
+			return (S)this;
+		}
+		return addPaths(ClassLoaders.getResources(classLoader, pathColls).stream().map(file -> file.getAbsolutePath()).collect(Collectors.toSet()));
+	}
+	
+	@SafeVarargs
+	public final S addResources(ClassLoader classLoader, String... paths) {
+		return addResources(classLoader, Arrays.asList(paths));
+	}
+	
+	@SafeVarargs
+	public final S addResources(String... paths) {
+		return addResources(Arrays.asList(paths)); 
+	}	
+	
+	@SafeVarargs
+	public final S addResources(Collection<String>... pathCollections) {
+		return addResources(null, pathCollections);
+	}
+	
 	Collection<String> getPaths() {
 		return paths;
 	}
@@ -87,17 +126,66 @@ abstract class SearchConfigAbst<S extends SearchConfigAbst<S>> implements AutoCl
 		return (S)this;
 	}
 	
-	public S withScanFileCriteria(FileSystemItem.Criteria scanFileCriteria) {
-		this.scanFileCriteria = scanFileCriteria;
+	@SafeVarargs
+	public final S excludePathsThatMatch(Collection<String>... pathRegExCollections) {
+		for(Collection<String> pathRegExCollection : pathRegExCollections) {
+			for(String pathRegEx : pathRegExCollection) {
+				if (scanFileCriteriaModifier == null) {
+					scanFileCriteriaModifier = FileSystemItem.Criteria.create().excludePathsThatMatch(pathRegEx);
+				} else {
+					scanFileCriteriaModifier.and().excludePathsThatMatch(pathRegEx);
+				}
+			}
+		}
 		return (S)this;
 	}
 	
-	FileSystemItem.Criteria getScanFileCriteria(){
-		return this.scanFileCriteria;
+	@SafeVarargs
+	public final S excludePathsThatMatch(String... regex) {
+		return excludePathsThatMatch(Arrays.asList(regex));
+	}
+	
+	public S notRecursiveOnPath(String path, boolean isAbsolute) {
+		if (scanFileCriteriaModifier == null) {
+			scanFileCriteriaModifier = FileSystemItem.Criteria.create().notRecursiveOnPath(path, isAbsolute);
+		} else {
+			scanFileCriteriaModifier.and().notRecursiveOnPath(path, isAbsolute);
+		}
+		return (S)this;
+	}
+	
+	S withDefaultScanFileCriteria(FileSystemItem.Criteria scanFileCriteria) {
+		defaultScanFileCriteriaSupplier = () -> scanFileCriteria;
+		return (S)this;
+	}
+	
+	public S withScanFileCriteria(FileSystemItem.Criteria scanFileCriteria) {
+		this.scanFileCriteriaSupplier = () -> scanFileCriteria;
+		return (S)this;
+	}
+	
+	FileSystemItem.Criteria buildScanFileCriteria(){
+		FileSystemItem.Criteria criteria = 
+			scanFileCriteriaSupplier == null ?
+				defaultScanFileCriteriaSupplier.get() :
+				scanFileCriteriaSupplier.get();
+			
+		if (scanFileCriteriaModifier != null) {
+			criteria = criteria.and(scanFileCriteriaModifier);
+		}
+		return criteria;
+	}
+	
+	boolean scanFileCriteriaHasNoPredicate() {
+		return scanFileCriteriaSupplier == null && scanFileCriteriaModifier == null;
 	}
 	
 	ClassCriteria getClassCriteria() {
 		return classCriteria;
+	}
+	
+	BiConsumer<ClassLoader, Collection<String>> getResourceSupllier() {
+		return this.resourceSupplier;
 	}
 	
 	public S useDefaultPathScannerClassLoader(boolean value) {
@@ -163,7 +251,12 @@ abstract class SearchConfigAbst<S extends SearchConfigAbst<S>> implements AutoCl
 		destConfig.classCriteria = this.classCriteria.createCopy();
 		destConfig.paths = new HashSet<>();
 		destConfig.paths.addAll(this.paths);
-		destConfig.scanFileCriteria = this.scanFileCriteria.createCopy();
+		destConfig.resourceSupplier = this.resourceSupplier;
+		destConfig.scanFileCriteriaSupplier = this.scanFileCriteriaSupplier;
+		destConfig.defaultScanFileCriteriaSupplier = this.defaultScanFileCriteriaSupplier;
+		if (this.scanFileCriteriaModifier != null) {
+			destConfig.scanFileCriteriaModifier = this.scanFileCriteriaModifier.createCopy();
+		}
 		destConfig.optimizePaths = this.optimizePaths;
 		destConfig.useDefaultPathScannerClassLoader = this.useDefaultPathScannerClassLoader;
 		destConfig.parentClassLoaderForPathScannerClassLoader = this.parentClassLoaderForPathScannerClassLoader;
@@ -181,6 +274,13 @@ abstract class SearchConfigAbst<S extends SearchConfigAbst<S>> implements AutoCl
 	public void close() {
 		this.classCriteria.close();
 		this.classCriteria = null;
+		this.scanFileCriteriaSupplier = null;
+		this.defaultScanFileCriteriaSupplier = null;
+		this.resourceSupplier = null;
+		if (this.scanFileCriteriaModifier != null) {
+			this.scanFileCriteriaModifier.close();
+			this.scanFileCriteriaModifier = null;
+		}
 		this.paths.clear();
 		this.paths = null;
 		this.parentClassLoaderForPathScannerClassLoader = null;

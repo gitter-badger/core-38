@@ -46,8 +46,8 @@ import org.burningwave.core.ManagedLogger;
 import org.burningwave.core.function.ThrowingRunnable;
 import org.burningwave.core.function.ThrowingSupplier;
 
-@SuppressWarnings("resource")
-public class Synchronizer implements AutoCloseable, ManagedLogger {
+
+public class Synchronizer implements Closeable, ManagedLogger {
 	Map<String, Mutex> mutexes;
 	String name;
 	ThreadsMonitorer allThreadsMonitorer;
@@ -216,9 +216,8 @@ public class Synchronizer implements AutoCloseable, ManagedLogger {
 	public void stopAllThreadsMonitoring(boolean waitThreadToFinish) {
 		ThreadsMonitorer allThreadsMonitorer = this.allThreadsMonitorer;
 		if (allThreadsMonitorer != null) {
-			allThreadsMonitorer.close();
-		}
-		allThreadsMonitorer.stop(waitThreadToFinish);
+			allThreadsMonitorer.stop(waitThreadToFinish);
+		}		
 	}
 	
 	public static class Mutex {

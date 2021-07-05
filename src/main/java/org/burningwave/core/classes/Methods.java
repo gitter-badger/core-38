@@ -36,19 +36,14 @@ import static org.burningwave.core.assembler.StaticComponentContainer.Throwables
 
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
-import java.lang.invoke.MethodHandles.Lookup;
 import java.lang.invoke.MethodType;
-import java.lang.reflect.Executable;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
-import java.util.AbstractMap;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -84,8 +79,14 @@ public class Methods extends Members.Handler.OfExecutable<Method, MethodCriteria
 			if (membersThatMatch.size() == 1) {
 				return membersThatMatch.stream().findFirst().get();
 			}
+			Throwables.throwException(
+				"Found more than one of method named {} with argument types {} in {} hierarchy",
+				memberName,
+				String.join(", ", Arrays.asList(argumentTypes).stream().map(cls -> cls.getName()).collect(Collectors.toList())),
+				targetClass.getName()
+			);
 		}
-		return Throwables.throwException("Method {} not found or found more than one method in {} hierarchy", memberName, targetClass.getName());
+		return null;
 	}
 	
 	public Method findFirstAndMakeItAccessible(Class<?> targetClass, String memberName, Class<?>... arguments) {
@@ -99,7 +100,7 @@ public class Methods extends Members.Handler.OfExecutable<Method, MethodCriteria
 			}
 			return members.stream().findFirst().get();
 		}
-		return Throwables.throwException("Method {} not found in {} hierarchy", memberName, targetClass.getName());
+		return null;
 	}
 	
 	public Collection<Method> findAllByExactNameAndMakeThemAccessible(
@@ -127,19 +128,19 @@ public class Methods extends Members.Handler.OfExecutable<Method, MethodCriteria
 		String cacheKey = getCacheKey(targetClass, cacheKeyPrefix, arguments);
 		ClassLoader targetClassClassLoader = Classes.getClassLoader(targetClass);
 		return Cache.uniqueKeyForMethods.getOrUploadIfAbsent(targetClassClassLoader, cacheKey, () -> {
-			MethodCriteria criteria = MethodCriteria.create()
+			MethodCriteria criteria = MethodCriteria.forEntireClassHierarchy()
 				.name(namePredicate)
 				.and().parameterTypesAreAssignableFrom(arguments);			
 			if (arguments != null && arguments.length == 0) {
-				criteria = criteria.or(MethodCriteria.create().name(namePredicate).and().parameter((parameters, idx) -> parameters.length == 1 && parameters[0].isVarArgs()));
+				criteria = criteria.or(MethodCriteria.forEntireClassHierarchy().name(namePredicate).and().parameter((parameters, idx) -> parameters.length == 1 && parameters[0].isVarArgs()));
 			}
 			MethodCriteria finalCriteria = criteria;
 			return Cache.uniqueKeyForMethods.getOrUploadIfAbsent(targetClassClassLoader, cacheKey, () -> 
 				Collections.unmodifiableCollection(
-					findAllAndMakeThemAccessible(targetClass).stream().filter(
-						finalCriteria.getPredicateOrTruePredicateIfPredicateIsNull()
-					).collect(
-						Collectors.toCollection(LinkedHashSet::new)
+					findAllAndApply(
+							finalCriteria, targetClass, (member) -> {
+							setAccessible(member, true);
+						}
 					)
 				)
 			);
@@ -154,10 +155,8 @@ public class Methods extends Members.Handler.OfExecutable<Method, MethodCriteria
 		Collection<Method> members = Cache.uniqueKeyForMethods.getOrUploadIfAbsent(
 			targetClassClassLoader, cacheKey, () -> {
 				return Collections.unmodifiableCollection(
-					findAllAndApply(
-						MethodCriteria.create(), targetClass, (member) -> {
-							LowLevelObjectsHandler.setAccessible(member, true);
-						}
+					findAllAndMakeThemAccessible(
+						MethodCriteria.forEntireClassHierarchy(), targetClass
 					)
 				);
 			}
@@ -168,7 +167,8 @@ public class Methods extends Members.Handler.OfExecutable<Method, MethodCriteria
 	public 	<T> T invokeStatic(Class<?> targetClass, String methodName, Object... arguments) {
 		return invoke(
 			targetClass, null, methodName, method -> 
-				(T)method.invoke(null, 
+				(T)LowLevelObjectsHandler.invoke(null,
+					method,
 					getArgumentArray(
 						method,
 						this::getArgumentListWithArrayForVarArgs,
@@ -184,9 +184,8 @@ public class Methods extends Members.Handler.OfExecutable<Method, MethodCriteria
 		return invoke(
 			Classes.retrieveFrom(target), 
 			null, methodName, method -> 
-				(T)method.invoke(
-					target,
-					getArgumentArray(
+				(T)LowLevelObjectsHandler.invoke(
+						target, method, getArgumentArray(
 						method,
 						this::getArgumentListWithArrayForVarArgs,
 						ArrayList::new, 
@@ -198,7 +197,13 @@ public class Methods extends Members.Handler.OfExecutable<Method, MethodCriteria
 	}
 	
 	private <T> T invoke(Class<?> targetClass, Object target, String methodName, ThrowingFunction<Method, T, Throwable> methodInvoker, Object... arguments) {
-		return Executor.get(() ->methodInvoker.apply(findFirstAndMakeItAccessible(targetClass, methodName, Classes.retrieveFrom(arguments))));
+		return Executor.get(() -> {
+			Method method = findFirstAndMakeItAccessible(targetClass, methodName, Classes.retrieveFrom(arguments));
+			if (method == null) {
+				Throwables.throwException("Method {} not found in {} hierarchy", methodName, targetClass.getName());
+			}
+			return methodInvoker.apply(method);
+		});
 	}
 	
 	public 	<T> T invokeStaticDirect(Class<?> targetClass, String methodName, Object... arguments) {
@@ -219,51 +224,54 @@ public class Methods extends Members.Handler.OfExecutable<Method, MethodCriteria
 	
 	private <T> T invokeDirect(Class<?> targetClass, Object target, String methodName, Supplier<List<Object>> listSupplier,  Object... arguments) {
 		Class<?>[] argsType = Classes.retrieveFrom(arguments);
+		Members.Handler.OfExecutable.Box<Method> methodHandleBox = findDirectHandleBox(targetClass, methodName, argsType);
+		return Executor.get(() -> {
+				Method method = methodHandleBox.getExecutable();
+				List<Object> argumentList = getFlatArgumentList(method, listSupplier, arguments);
+				return (T)methodHandleBox.getHandler().invokeWithArguments(argumentList);
+			}
+		);
+	}
+	
+	public MethodHandle findDirectHandle(Class<?> targetClass, String methodName, Class<?>... arguments) {
+		return findDirectHandleBox(targetClass, methodName, arguments).getHandler();
+	}
+	
+	private Members.Handler.OfExecutable.Box<Method> findDirectHandleBox(Class<?> targetClass, String methodName, Class<?>... argsType) {
 		String cacheKey = getCacheKey(targetClass, "equals " + methodName, argsType);
 		ClassLoader targetClassClassLoader = Classes.getClassLoader(targetClass);
-		Entry<Executable, MethodHandle> methodHandleBag = Cache.uniqueKeyForExecutableAndMethodHandle.getOrUploadIfAbsent(
-			targetClassClassLoader, cacheKey, 
-			() -> {
-				Method method = findFirstAndMakeItAccessible(targetClass, methodName, argsType);
-				return new AbstractMap.SimpleEntry<>(
-					method, 
-					convertToMethodHandle(
-						method
-					)
-				);
+		Members.Handler.OfExecutable.Box<Method> entry =
+			(Box<Method>)Cache.uniqueKeyForExecutableAndMethodHandle.get(targetClassClassLoader, cacheKey);
+		if (entry == null) {
+			Method method = findFirstAndMakeItAccessible(targetClass, methodName, argsType);
+			if (method == null) {
+				Throwables.throwException("Method {} not found in {} hierarchy", methodName, targetClass.getName());
 			}
-		);
-		return Executor.get(() -> {
-				Method method = (Method)methodHandleBag.getKey();
-				List<Object> argumentList = getFlatArgumentList(method, listSupplier, arguments);
-				return (T)methodHandleBag.getValue().invokeWithArguments(argumentList);
-			}
-		);
-	}
-	
-	public MethodHandle convertToMethodHandle(Method method) {
-		return convertToMethodHandleBag(method).getValue();
-	}
-	
-	public Map.Entry<Lookup, MethodHandle> convertToMethodHandleBag(Method method) {
-		try {
-			Class<?> methodDeclaringClass = method.getDeclaringClass();
-			MethodHandles.Lookup consulter = LowLevelObjectsHandler.getConsulter(methodDeclaringClass);
-			return new AbstractMap.SimpleEntry<>(consulter,
-				!Modifier.isStatic(method.getModifiers())?
-					consulter.findSpecial(
-						methodDeclaringClass, method.getName(),
-						MethodType.methodType(method.getReturnType(), method.getParameterTypes()),
-						methodDeclaringClass
-					):
-					consulter.findStatic(
-						methodDeclaringClass, method.getName(),
-						MethodType.methodType(method.getReturnType(), method.getParameterTypes())
-					)
+			entry = findDirectHandleBox(
+				method, targetClassClassLoader, cacheKey
 			);
-		} catch (NoSuchMethodException | IllegalAccessException exc) {
-			return Throwables.throwException(exc);
 		}
+		return entry;
 	}
 	
+	
+	@Override
+	MethodHandle retrieveMethodHandle(MethodHandles.Lookup consulter, Method method) throws NoSuchMethodException, IllegalAccessException {
+		Class<?> methodDeclaringClass = method.getDeclaringClass(); 
+		return !Modifier.isStatic(method.getModifiers())?
+			consulter.findSpecial(
+				methodDeclaringClass, retrieveNameForCaching(method),
+				MethodType.methodType(method.getReturnType(), method.getParameterTypes()),
+				methodDeclaringClass
+			):
+			consulter.findStatic(
+				methodDeclaringClass, retrieveNameForCaching(method),
+				MethodType.methodType(method.getReturnType(), method.getParameterTypes())
+			);
+	}
+	
+	@Override
+	String retrieveNameForCaching(Method method) {
+		return method.getName();
+	}
 }

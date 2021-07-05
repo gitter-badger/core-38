@@ -30,6 +30,7 @@ package org.burningwave.core.classes;
 
 import static org.burningwave.core.assembler.StaticComponentContainer.BackgroundExecutor;
 import static org.burningwave.core.assembler.StaticComponentContainer.Classes;
+import static org.burningwave.core.assembler.StaticComponentContainer.ManagedLoggersRepository;
 import static org.burningwave.core.assembler.StaticComponentContainer.Throwables;
 
 import java.nio.ByteBuffer;
@@ -40,13 +41,14 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
-import org.burningwave.core.Component;
+import org.burningwave.core.Closeable;
 import org.burningwave.core.Context;
+import org.burningwave.core.ManagedLogger;
 import org.burningwave.core.concurrent.QueuedTasksExecutor;
 import org.burningwave.core.function.Executor;
 import org.burningwave.core.function.ThrowingSupplier;
 
-public class SearchContext<T> implements Component {
+class SearchContext<T> implements Closeable, ManagedLogger {
 
 	SearchConfigAbst<?> searchConfig;
 	Map<String, T> itemsFoundFlatMap;
@@ -214,11 +216,11 @@ public class SearchContext<T> implements Component {
 						}
 					} 
 				} else {
-					logError("Could not retrieve className from exception", exc);
+					ManagedLoggersRepository.logError(getClass()::getName, "Could not retrieve className from exception", exc);
 				}
 				return defaultValueSupplier.get();
 			} catch (LinkageError | SecurityException | InternalError exc) {
-				logWarn("Could not load class {}: {}", classNameSupplier.get(), exc.toString());
+				ManagedLoggersRepository.logWarn(getClass()::getName, "Could not load class {}: {}", classNameSupplier.get(), exc.toString());
 			}
 			return defaultValueSupplier.get();
 		});

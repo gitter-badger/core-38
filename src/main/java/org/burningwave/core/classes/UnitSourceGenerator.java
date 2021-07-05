@@ -28,6 +28,7 @@
  */
 package org.burningwave.core.classes;
 
+import static org.burningwave.core.assembler.StaticComponentContainer.ManagedLoggersRepository;
 import static org.burningwave.core.assembler.StaticComponentContainer.Paths;
 import static org.burningwave.core.assembler.StaticComponentContainer.Streams;
 
@@ -42,10 +43,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 
 import org.burningwave.core.io.FileSystemItem;
 
 public class UnitSourceGenerator extends SourceGenerator.Abst {
+
+	private static final long serialVersionUID = -954913599817628229L;
+	
 	private String packageName;
 	private Collection<String> imports;
 	private Collection<ClassSourceGenerator> classes;	
@@ -59,24 +64,24 @@ public class UnitSourceGenerator extends SourceGenerator.Abst {
 	}
 	
 	public UnitSourceGenerator addImport(String... imports) {
-		this.imports = Optional.ofNullable(this.imports).orElseGet(ArrayList::new);
+		Optional.ofNullable(this.imports).orElseGet(() -> this.imports = new ArrayList<>());
 		for (String imprt : imports) {
-			this.imports.add(imprt);
+			this.imports.add(normalize(imprt));
 		}
 		return this;
 	}
 	
 	public UnitSourceGenerator addStaticImport(java.lang.Class<?> cls, String... innerElements) {
 		for (String innerElement : innerElements) {
-			addStaticImport(cls.getName() + "." + innerElement);
+			addStaticImport(normalize(cls.getName()) + "." + innerElement);
 		}
 		return this;
 	}
 	
 	public UnitSourceGenerator addStaticImport(String... imports) {
-		this.imports = Optional.ofNullable(this.imports).orElseGet(ArrayList::new);
+		Optional.ofNullable(this.imports).orElseGet(() -> this.imports = new ArrayList<>());
 		for (String imprt : imports) {
-			this.imports.add("static " + imprt);
+			this.imports.add("static " + normalize(imprt));
 		}
 		return this;
 	}
@@ -84,16 +89,16 @@ public class UnitSourceGenerator extends SourceGenerator.Abst {
 	public UnitSourceGenerator addImport(java.lang.Class<?>... classes) {
 		for (java.lang.Class<?> cls : classes) {
 			if (Modifier.isPublic(cls.getModifiers())) {
-				this.addImport(cls.getName());
+				this.addImport(normalize(cls.getName()));
 			} else {
-				logWarn("Could not import {} because its modifier is not public", cls.getName());
+				ManagedLoggersRepository.logWarn(getClass()::getName, "Could not import {} because its modifier is not public", cls.getName());
 			}
 		}
 		return this;
 	}
 	
 	public UnitSourceGenerator addClass(ClassSourceGenerator... clazzes) {
-		this.classes = Optional.ofNullable(this.classes).orElseGet(ArrayList::new);
+		Optional.ofNullable(this.classes).orElseGet(() -> this.classes = new ArrayList<>());
 		for (ClassSourceGenerator cls : clazzes) {
 			classes.add(cls);
 		}
@@ -104,7 +109,7 @@ public class UnitSourceGenerator extends SourceGenerator.Abst {
 		List<String> imports = new ArrayList<>();
 		Optional.ofNullable(this.imports).ifPresent(imprts -> {
 			imprts.forEach(imprt -> {
-				imports.add("import " + imprt.replace("$", ".") + ";");
+				imports.add("import " + normalize(imprt.replace("$", ".")) + ";");
 			});
 		});
 		
@@ -112,11 +117,14 @@ public class UnitSourceGenerator extends SourceGenerator.Abst {
 			Boolean isPublic = typeDeclaration.isPublic();
 			String className = typeDeclaration.getName();
 			if (isPublic == null || isPublic) {	
-				Optional.ofNullable(className).ifPresent(clsName -> {
-					imports.add("import " + clsName.replace("$", ".") + ";");
-				});
+				boolean useFullyQualifiedName = typeDeclaration.useFullyQualifiedName();
+				if (!useFullyQualifiedName) {
+					Optional.ofNullable(className).ifPresent(clsName -> {
+						imports.add("import " + normalize(clsName.replace("$", ".")) + ";");
+					});
+				}
 			} else {
-				logWarn("Could not import {} because its modifier is not public", className);
+				ManagedLoggersRepository.logWarn(getClass()::getName, "Could not import {} because its modifier is not public", className);
 			}
 		});
 		Collections.sort(imports);
@@ -155,8 +163,15 @@ public class UnitSourceGenerator extends SourceGenerator.Abst {
 		return this.packageName;
 	}
 	
-	public ClassSourceGenerator getClass(String className) {
+	ClassSourceGenerator getClass(String className) {
 		return getAllClasses().get(className);
+	}
+	
+	private String normalize(String imprt) {
+		if (imprt.contains("[")) {
+			imprt = imprt.replace("[L", "").replace("[", "").replace("]", "").replace(";", "");
+		}
+		return imprt;
 	}
 	
 	@Override
@@ -169,11 +184,19 @@ public class UnitSourceGenerator extends SourceGenerator.Abst {
 	public FileSystemItem storeToClassPath(String classPathFolder) {
 		classPathFolder = Paths.clean(classPathFolder);
 		String classRelativePath = packageName != null? packageName.replace(".", "/") : "";
+		String fileName = null;
 		for (ClassSourceGenerator cSG : classes) {
-			if (cSG.getModifier() != null && Modifier.isPublic(cSG.getModifier())) {
-				classRelativePath += "/" + cSG.getSimpleName() + ".java";
-				break;
+			if (fileName == null || (cSG.getModifier() != null && Modifier.isPublic(cSG.getModifier()))) {
+				fileName = cSG.getSimpleName() + ".java";
+				if (cSG.getModifier() != null && Modifier.isPublic(cSG.getModifier())) {
+					break;
+				}
 			}
+		}
+		if (fileName != null) {
+			classRelativePath += "/" + fileName;
+		} else {
+			classRelativePath += "/" + UUID.randomUUID().toString() + ".java";
 		}
 		return Streams.store(classPathFolder + "/" + classRelativePath, make().getBytes());
 	}

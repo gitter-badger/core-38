@@ -34,6 +34,7 @@ import static org.burningwave.core.assembler.StaticComponentContainer.Constructo
 import static org.burningwave.core.assembler.StaticComponentContainer.Fields;
 import static org.burningwave.core.assembler.StaticComponentContainer.JVMInfo;
 import static org.burningwave.core.assembler.StaticComponentContainer.LowLevelObjectsHandler;
+import static org.burningwave.core.assembler.StaticComponentContainer.ManagedLoggersRepository;
 import static org.burningwave.core.assembler.StaticComponentContainer.Members;
 import static org.burningwave.core.assembler.StaticComponentContainer.Methods;
 import static org.burningwave.core.assembler.StaticComponentContainer.Resources;
@@ -47,7 +48,6 @@ import java.lang.invoke.MethodType;
 import java.lang.reflect.AccessibleObject;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
-import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.nio.Buffer;
@@ -55,95 +55,71 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Map;
+import java.util.function.BiConsumer;
 import java.util.function.Function;
 
+import org.burningwave.core.Closeable;
 import org.burningwave.core.Component;
+import org.burningwave.core.ManagedLogger;
 import org.burningwave.core.assembler.StaticComponentContainer;
 import org.burningwave.core.classes.MembersRetriever;
 import org.burningwave.core.classes.MemoryClassLoader;
 import org.burningwave.core.classes.MethodCriteria;
 import org.burningwave.core.function.Executor;
-import org.burningwave.core.function.ThrowingBiConsumer;
-import org.burningwave.core.function.ThrowingFunction;
-import org.burningwave.core.function.ThrowingTriFunction;
+import org.burningwave.core.function.TriFunction;
 import org.burningwave.core.io.ByteBufferOutputStream;
 
 import sun.misc.Unsafe;
 
 @SuppressWarnings({"all"})
-public class LowLevelObjectsHandler implements Component, MembersRetriever {
-
-	Unsafe unsafe;
-	Runnable illegalAccessLoggerEnabler;
-	Runnable illegalAccessLoggerDisabler;
+public class LowLevelObjectsHandler implements Closeable, ManagedLogger, MembersRetriever {
+	
+	Driver driver;
 	
 	Field[] emtpyFieldsArray;
 	Method[] emptyMethodsArray;
 	Constructor<?>[] emptyConstructorsArray;
-	
-	MethodHandle getDeclaredFieldsRetriever;
-	MethodHandle getDeclaredMethodsRetriever;
-	MethodHandle getDeclaredConstructorsRetriever;
-	ThrowingTriFunction<ClassLoader, Object, String, Package, Throwable> packageRetriever;	
-	Method methodInvoker;
-	ThrowingBiConsumer<AccessibleObject, Boolean, Throwable> accessibleSetter;
-	ThrowingFunction<Class<?>, MethodHandles.Lookup, Throwable> consulterRetriever;
-	
-	Long loadedPackagesMapMemoryOffset;
-	Long loadedClassesVectorMemoryOffset;	
-	
-	Class<?> classLoaderDelegateClass;
-	Class<?> builtinClassLoaderClass;
 
 	private LowLevelObjectsHandler() {
-		Initializer.build(this);
+		emtpyFieldsArray = new Field[]{};
+		emptyMethodsArray = new Method[]{};
+		emptyConstructorsArray = new Constructor<?>[]{};
+		driver = Driver.create();
 	}
 	
 	public static LowLevelObjectsHandler create() {
 		return new LowLevelObjectsHandler();
 	}
 	
-	public void disableIllegalAccessLogger() {
-	    if (illegalAccessLoggerDisabler != null) {
-	    	illegalAccessLoggerDisabler.run();
-	    }
-	}
-	
-	public void enableIllegalAccessLogger() {
-	    if (illegalAccessLoggerEnabler != null) {
-	    	illegalAccessLoggerEnabler.run();
-	    }
-	}
-	
 	public Class<?> defineAnonymousClass(Class<?> outerClass, byte[] byteCode, Object[] var3) {
-		return unsafe.defineAnonymousClass(outerClass, byteCode, var3);
+		return driver.defineAnonymousClass(outerClass, byteCode, var3);
 	}
 	
 	public Package retrieveLoadedPackage(ClassLoader classLoader, Object packageToFind, String packageName) throws Throwable {
-		return packageRetriever.apply(classLoader, packageToFind, packageName);
+		return driver.retrieveLoadedPackage(classLoader, packageToFind, packageName);
 	}
 		
 	public Collection<Class<?>> retrieveLoadedClasses(ClassLoader classLoader) {
-		return (Collection<Class<?>>)unsafe.getObject(classLoader, loadedClassesVectorMemoryOffset);
+		return driver.retrieveLoadedClasses(classLoader);
 	}
 	
 	public Map<String, ?> retrieveLoadedPackages(ClassLoader classLoader) {
-		return (Map<String, ?>)unsafe.getObject(classLoader, loadedPackagesMapMemoryOffset);
+		return driver.retrieveLoadedPackages(classLoader);
 	}
 	
 	public boolean isBuiltinClassLoader(ClassLoader classLoader) {
-		return builtinClassLoaderClass != null && builtinClassLoaderClass.isAssignableFrom(classLoader.getClass());
+		return driver.isBuiltinClassLoader(classLoader);
 	}
 	
 	public boolean isClassLoaderDelegate(ClassLoader classLoader) {
-		return classLoaderDelegateClass != null && classLoaderDelegateClass.isAssignableFrom(classLoader.getClass());
+		return driver.isClassLoaderDelegate(classLoader);
 	}
 	
 	public ClassLoader getParent(ClassLoader classLoader) {
 		if (isClassLoaderDelegate(classLoader)) {
 			return getParent(Fields.getDirect(classLoader, "classLoader"));
 		} else if (isBuiltinClassLoader(classLoader)) {
-			Field builtinClassLoaderClassParentField = Fields.findFirstAndMakeItAccessible(builtinClassLoaderClass, "parent", classLoader.getClass());
+			Field builtinClassLoaderClassParentField = Fields.findFirstAndMakeItAccessible(driver.getBuiltinClassLoaderClass(), "parent", classLoader.getClass());
 			return Executor.get(() ->(ClassLoader) builtinClassLoaderClassParentField.get(classLoader));
 		} else {
 			return classLoader.getParent();
@@ -183,7 +159,7 @@ public class LowLevelObjectsHandler implements Component, MembersRetriever {
 						String.class, boolean.class
 					), classLoader.getClass()
 				);					
-				classLoader = (ClassLoader)Constructors.newInstanceOf(classLoaderDelegateClass, null, classLoader, Methods.convertToMethodHandle(
+				classLoader = (ClassLoader)Constructors.newInstanceOf(driver.getClassLoaderDelegateClass(), null, classLoader, Methods.findDirectHandle(
 					methods.stream().skip(methods.size() - 1).findFirst().get()
 				));
 			} catch (Throwable exc) {
@@ -220,148 +196,46 @@ public class LowLevelObjectsHandler implements Component, MembersRetriever {
 		try {
 			object.setAccessible(true);
 		} catch (Throwable exc) {
-			try {
-				accessibleSetter.accept(object, flag);
-			} catch (Throwable exc2) {
-				Throwables.throwException(exc2);
-			}
+			driver.setAccessible(object, flag);
 		}
 	}
 	
-	public Object invoke(Object target, Method method, Object... params) throws IllegalAccessException, IllegalArgumentException, InvocationTargetException {
+	public Object invoke(Object target, Method method, Object... params) {
 		if (params == null) {
 			params = new Object[] {null};
 		}
-		return methodInvoker.invoke(null, method, target, params);
+		try {
+			return method.invoke(target, params);
+		} catch (Throwable exc) {
+			return driver.invoke(method, target, params);
+		}
+	}
+	
+	public <T> T newInstance(Constructor<T> ctor, Object... params) {
+		if (params == null) {
+			params = new Object[] {null};
+		}
+		try {
+			return ctor.newInstance(params);
+		} catch (Throwable exc) {
+			return driver.newInstance(ctor, params);
+		}
 	}
 	
 	public <T> T getFieldValue(Object target, Field field) {
-		target = Modifier.isStatic(field.getModifiers())?
-			field.getDeclaringClass() :
-			target;
-		long fieldOffset = Modifier.isStatic(field.getModifiers())?
-			unsafe.staticFieldOffset(field) :
-			unsafe.objectFieldOffset(field);
-		Class<?> cls = field.getType();
-		if(!cls.isPrimitive()) {
-			if (!Modifier.isVolatile(field.getModifiers())) {
-				return (T)unsafe.getObject(target, fieldOffset);
-			} else {
-				return (T)unsafe.getObjectVolatile(target, fieldOffset);
-			}
-		} else if (cls == int.class) {
-			if (!Modifier.isVolatile(field.getModifiers())) {
-				return (T)Integer.valueOf(unsafe.getInt(target, fieldOffset));
-			} else {
-				return (T)Integer.valueOf(unsafe.getIntVolatile(target, fieldOffset));
-			}
-		} else if (cls == long.class) {
-			if (!Modifier.isVolatile(field.getModifiers())) {
-				return (T)Long.valueOf(unsafe.getLong(target, fieldOffset));
-			} else {
-				return (T)Long.valueOf(unsafe.getLongVolatile(target, fieldOffset));
-			}
-		} else if (cls == float.class) {
-			if (!Modifier.isVolatile(field.getModifiers())) {
-				return (T)Float.valueOf(unsafe.getFloat(target, fieldOffset));
-			} else {
-				return (T)Float.valueOf(unsafe.getFloatVolatile(target, fieldOffset));
-			}
-		} else if (cls == double.class) {
-			if (!Modifier.isVolatile(field.getModifiers())) {
-				return (T)Double.valueOf(unsafe.getDouble(target, fieldOffset));
-			} else {
-				return (T)Double.valueOf(unsafe.getDoubleVolatile(target, fieldOffset));
-			}
-		} else if (cls == boolean.class) {
-			if (!Modifier.isVolatile(field.getModifiers())) {
-				return (T)Boolean.valueOf(unsafe.getBoolean(target, fieldOffset));
-			} else {
-				return (T)Boolean.valueOf(unsafe.getBooleanVolatile(target, fieldOffset));
-			}
-		} else if (cls == byte.class) {
-			if (!Modifier.isVolatile(field.getModifiers())) {
-				return (T)Byte.valueOf(unsafe.getByte(target, fieldOffset));
-			} else {
-				return (T)Byte.valueOf(unsafe.getByteVolatile(target, fieldOffset));
-			}
-		} else {
-			if (!Modifier.isVolatile(field.getModifiers())) {
-				return (T)Character.valueOf(unsafe.getChar(target, fieldOffset));
-			} else {
-				return (T)Character.valueOf(unsafe.getCharVolatile(target, fieldOffset));
-			}
-		}
+		return driver.getFieldValue(target, field);
 	}
 	
 	public void setFieldValue(Object target, Field field, Object value) {
-		if(value != null && !Classes.isAssignableFrom(field.getType(), value.getClass())) {
-			Throwables.throwException("Value {} is not assignable to {}", value , field.getName());
-		}
-		target = Modifier.isStatic(field.getModifiers())?
-			field.getDeclaringClass() :
-			target;
-		long fieldOffset = Modifier.isStatic(field.getModifiers())?
-			unsafe.staticFieldOffset(field) :
-			unsafe.objectFieldOffset(field);
-		Class<?> cls = field.getType();
-		if(!cls.isPrimitive()) {
-			if (!Modifier.isVolatile(field.getModifiers())) {
-				unsafe.putObject(target, fieldOffset, value);
-			} else {
-				unsafe.putObjectVolatile(target, fieldOffset, value);
-			}			
-		} else if (cls == int.class) {
-			if (!Modifier.isVolatile(field.getModifiers())) {
-				unsafe.putInt(target, fieldOffset, ((Integer)value).intValue());
-			} else {
-				unsafe.putIntVolatile(target, fieldOffset, ((Integer)value).intValue());
-			}
-		} else if (cls == long.class) {
-			if (!Modifier.isVolatile(field.getModifiers())) {
-				unsafe.putLong(target, fieldOffset, ((Long)value).longValue());
-			} else {
-				unsafe.putLongVolatile(target, fieldOffset, ((Long)value).longValue());
-			}
-		} else if (cls == float.class) {
-			if (!Modifier.isVolatile(field.getModifiers())) {
-				unsafe.putFloat(target, fieldOffset, ((Float)value).floatValue());
-			} else {
-				unsafe.putFloatVolatile(target, fieldOffset, ((Float)value).floatValue());
-			}
-		} else if (cls == double.class) {
-			if (!Modifier.isVolatile(field.getModifiers())) {
-				unsafe.putDouble(target, fieldOffset, ((Double)value).doubleValue());
-			} else {
-				unsafe.putDoubleVolatile(target, fieldOffset, ((Double)value).doubleValue());
-			}
-		} else if (cls == boolean.class) {
-			if (!Modifier.isVolatile(field.getModifiers())) {
-				unsafe.putBoolean(target, fieldOffset, ((Boolean)value).booleanValue());
-			} else {
-				unsafe.putBooleanVolatile(target, fieldOffset, ((Boolean)value).booleanValue());
-			}
-		} else if (cls == byte.class) {
-			if (!Modifier.isVolatile(field.getModifiers())) {
-				unsafe.putByte(target, fieldOffset, ((Byte)value).byteValue());
-			} else {
-				unsafe.putByteVolatile(target, fieldOffset, ((Byte)value).byteValue());
-			}
-		} else if (cls == char.class) {
-			if (!Modifier.isVolatile(field.getModifiers())) {
-				unsafe.putChar(target, fieldOffset, ((Character)value).charValue());
-			} else {
-				unsafe.putCharVolatile(target, fieldOffset, ((Character)value).charValue());
-			}
-		}
+		driver.setFieldValue(target, field, value);
 	}
 	
 	@Override
 	public Field[] getDeclaredFields(Class<?> cls)  {
 		try {
-			return (Field[])getDeclaredFieldsRetriever.invoke(cls, false);
+			return driver.getDeclaredFields(cls);
 		} catch (Throwable exc) {
-			logWarn("Could not retrieve fields of class {}. Cause: {}", cls.getName(), exc.getMessage());
+			ManagedLoggersRepository.logWarn(getClass()::getName, "Could not retrieve fields of class {}. Cause: {}", cls.getName(), exc.getMessage());
 			return emtpyFieldsArray;
 		}		
 	}
@@ -369,9 +243,9 @@ public class LowLevelObjectsHandler implements Component, MembersRetriever {
 	@Override
 	public <T> Constructor<T>[] getDeclaredConstructors(Class<T> cls) {
 		try {
-			return (Constructor<T>[])getDeclaredConstructorsRetriever.invoke(cls, false);
+			return driver.getDeclaredConstructors(cls);
 		} catch (Throwable exc) {
-			logWarn("Could not retrieve constructors of class {}. Cause: {}", cls.getName(), exc.getMessage());
+			ManagedLoggersRepository.logWarn(getClass()::getName, "Could not retrieve constructors of class {}. Cause: {}", cls.getName(), exc.getMessage());
 			return (Constructor<T>[])emptyConstructorsArray;
 		}
 	}
@@ -379,43 +253,24 @@ public class LowLevelObjectsHandler implements Component, MembersRetriever {
 	@Override
 	public Method[] getDeclaredMethods(Class<?> cls)  {
 		try {
-			return (Method[])getDeclaredMethodsRetriever.invoke(cls, false);
+			return driver.getDeclaredMethods(cls);
 		} catch (Throwable exc) {
-			logWarn("Could not retrieve methods of class {}. Cause: {}", cls.getName(), exc.getMessage());
+			ManagedLoggersRepository.logWarn(getClass()::getName, "Could not retrieve methods of class {}. Cause: {}", cls.getName(), exc.getMessage());
 			return emptyMethodsArray;
 		}
 	}
 	
 	public MethodHandles.Lookup getConsulter(Class<?> cls) {
-		return Executor.get(() ->
-			consulterRetriever.apply(cls)
-		);
-	}
-	
-	public void throwException(Throwable exc) {
-		unsafe.throwException(exc);
+		return driver.getConsulter(cls);
 	}
 	
 	@Override
 	public void close() {
 		if (this != StaticComponentContainer.LowLevelObjectsHandler) {
-			loadedPackagesMapMemoryOffset = null;
-			loadedClassesVectorMemoryOffset = null;
-			unsafe = null;
-			illegalAccessLoggerEnabler = null;
-			illegalAccessLoggerDisabler = null;
 			emtpyFieldsArray = null;
 			emptyMethodsArray = null;
 			emptyConstructorsArray = null;
-			getDeclaredFieldsRetriever = null;
-			getDeclaredMethodsRetriever = null;
-			getDeclaredConstructorsRetriever = null;
-			packageRetriever = null;	
-			methodInvoker = null;
-			accessibleSetter = null;	
-			consulterRetriever = null;
-			classLoaderDelegateClass = null;
-			builtinClassLoaderClass = null;
+			driver.close();
 		} else {
 			Throwables.throwException("Could not close singleton instance " + this);
 		}
@@ -644,286 +499,5 @@ public class LowLevelObjectsHandler implements Component, MembersRetriever {
 			public boolean cleaningHasBeenPerformed();
 			
 		}
-	}
-	
-	private abstract static class Initializer implements Component {
-		LowLevelObjectsHandler lowLevelObjectsHandler;
-		
-		private Initializer(LowLevelObjectsHandler lowLevelObjectsHandler) {
-			this.lowLevelObjectsHandler = lowLevelObjectsHandler;
-			try {
-				Field theUnsafeField = Unsafe.class.getDeclaredField("theUnsafe");
-				theUnsafeField.setAccessible(true);
-				this.lowLevelObjectsHandler.unsafe = (Unsafe)theUnsafeField.get(null);
-			} catch (Throwable exc) {
-				logInfo("Exception while retrieving unsafe");
-				Throwables.throwException(exc);
-			}
-		}	
-		
-		void init() {
-			initEmptyMembersArrays();
-			initMembersRetrievers();
-			initSpecificElements();			
-			initClassesVectorField();
-			initPackagesMapField();
-		}
-
-
-		private void initPackagesMapField() {
-			this.lowLevelObjectsHandler.loadedClassesVectorMemoryOffset = lowLevelObjectsHandler.unsafe.objectFieldOffset(
-				lowLevelObjectsHandler.getDeclaredField(
-					ClassLoader.class, (field) ->
-					"classes".equals(field.getName())
-				)
-			);
-		}
-
-		private void initClassesVectorField() {
-			this.lowLevelObjectsHandler.loadedPackagesMapMemoryOffset = lowLevelObjectsHandler.unsafe.objectFieldOffset(
-				lowLevelObjectsHandler.getDeclaredField(
-					ClassLoader.class, (field) ->
-					"packages".equals(field.getName())
-				)
-			);
-		}
-
-		private void initEmptyMembersArrays() {
-			lowLevelObjectsHandler.emtpyFieldsArray = new Field[]{};
-			lowLevelObjectsHandler.emptyMethodsArray = new Method[]{};
-			lowLevelObjectsHandler.emptyConstructorsArray = new Constructor<?>[]{};
-		}
-		
-		private static void build(LowLevelObjectsHandler lowLevelObjectsHandler) {
-			try (Initializer initializer =
-					JVMInfo.getVersion() > 8 ?
-						JVMInfo.getVersion() > 13 ?
-							new ForJava14(lowLevelObjectsHandler):
-							new ForJava9(lowLevelObjectsHandler):
-						new ForJava8(lowLevelObjectsHandler)) {
-				initializer.init();
-			}
-		}
-		
-		private void initMembersRetrievers() {
-			try {
-				MethodHandles.Lookup consulter = lowLevelObjectsHandler.getConsulter(Class.class);
-				lowLevelObjectsHandler.getDeclaredFieldsRetriever = consulter.findSpecial(
-					Class.class,
-					"getDeclaredFields0",
-					MethodType.methodType(Field[].class, boolean.class),
-					Class.class
-				);
-				
-				lowLevelObjectsHandler.getDeclaredMethodsRetriever = consulter.findSpecial(
-					Class.class,
-					"getDeclaredMethods0",
-					MethodType.methodType(Method[].class, boolean.class),
-					Class.class
-				);
-
-				lowLevelObjectsHandler.getDeclaredConstructorsRetriever = consulter.findSpecial(
-					Class.class,
-					"getDeclaredConstructors0",
-					MethodType.methodType(Constructor[].class, boolean.class),
-					Class.class
-				);
-			} catch (Throwable exc) {
-				Throwables.throwException(exc);
-			}
-		}
-		
-		abstract void initSpecificElements();
-		
-		@Override
-		public void close() {
-			this.lowLevelObjectsHandler = null;
-		}
-		
-		private static class ForJava8 extends Initializer {
-
-			private ForJava8(LowLevelObjectsHandler lowLevelObjectsHandler) {
-				super(lowLevelObjectsHandler);
-				try {
-					Field modes = MethodHandles.Lookup.class.getDeclaredField("allowedModes");
-					modes.setAccessible(true);
-					lowLevelObjectsHandler.consulterRetriever = (cls) -> {
-						MethodHandles.Lookup consulter = MethodHandles.lookup().in(cls);
-						modes.setInt(consulter, -1);
-						return consulter;
-					};
-				} catch (NoSuchFieldException | SecurityException exc) {
-					Throwables.throwException(exc);
-				}
-			}
-
-			@Override
-			void initSpecificElements() {
-				lowLevelObjectsHandler.packageRetriever = (classLoader, object, packageName) -> (Package)object;
-				try {
-					final Method accessibleSetterMethod = AccessibleObject.class.getDeclaredMethod("setAccessible0", AccessibleObject.class, boolean.class);
-					accessibleSetterMethod.setAccessible(true);
-					lowLevelObjectsHandler.accessibleSetter = (accessibleObject, flag) ->
-						accessibleSetterMethod.invoke(null, accessibleObject, flag);
-				} catch (Throwable exc) {
-					logInfo("method setAccessible0 class not detected on " + AccessibleObject.class.getName());
-					Throwables.throwException(exc);
-				}
-				try {
-					lowLevelObjectsHandler.methodInvoker = Class.forName("sun.reflect.NativeMethodAccessorImpl").getDeclaredMethod("invoke0", Method.class, Object.class, Object[].class);
-					lowLevelObjectsHandler.setAccessible(lowLevelObjectsHandler.methodInvoker, true);
-				} catch (Throwable exc2) {
-					logError("method invoke0 of class jdk.internal.reflect.NativeMethodAccessorImpl not detected");
-					Throwables.throwException(exc2);
-				}		
-			}
-		}
-		
-		private static class ForJava9 extends Initializer {
-			
-			ForJava9(LowLevelObjectsHandler lowLevelObjectsHandler) {
-				super(lowLevelObjectsHandler);
-				try {
-			        Class<?> cls = Class.forName("jdk.internal.module.IllegalAccessLogger");
-			        Field logger = cls.getDeclaredField("logger");
-			        final long loggerFieldOffset = lowLevelObjectsHandler.unsafe.staticFieldOffset(logger);
-			        final Object illegalAccessLogger = lowLevelObjectsHandler.unsafe.getObjectVolatile(cls, loggerFieldOffset);
-			        lowLevelObjectsHandler.illegalAccessLoggerDisabler = () ->
-			        	lowLevelObjectsHandler.unsafe.putObjectVolatile(cls, loggerFieldOffset, null);
-			        lowLevelObjectsHandler.illegalAccessLoggerEnabler = () ->
-			        	lowLevelObjectsHandler.unsafe.putObjectVolatile(cls, loggerFieldOffset, illegalAccessLogger);
-			    } catch (Throwable e) {
-			    	
-			    }
-				lowLevelObjectsHandler.disableIllegalAccessLogger();
-				try {
-					MethodHandles.Lookup consulter = MethodHandles.lookup();
-					MethodHandle consulterRetrieverMethod = consulter.findStatic(
-						MethodHandles.class, "privateLookupIn",
-						MethodType.methodType(MethodHandles.Lookup.class, Class.class, MethodHandles.Lookup.class)
-					);
-					lowLevelObjectsHandler.consulterRetriever = cls ->
-						(MethodHandles.Lookup)consulterRetrieverMethod.invoke(cls, MethodHandles.lookup());
-				} catch (IllegalArgumentException | NoSuchMethodException
-						| SecurityException | IllegalAccessException exc) {
-					logError("Could not initialize consulter", exc);
-					Throwables.throwException(exc);
-				}
-			}
-
-			
-			@Override
-			void initSpecificElements() {
-				try {
-					final Method accessibleSetterMethod = AccessibleObject.class.getDeclaredMethod("setAccessible0", boolean.class);
-					accessibleSetterMethod.setAccessible(true);
-					lowLevelObjectsHandler.accessibleSetter = (accessibleObject, flag) ->
-						accessibleSetterMethod.invoke(accessibleObject, flag);
-				} catch (Throwable exc) {
-					logInfo("method setAccessible0 class not detected on " + AccessibleObject.class.getName());
-					Throwables.throwException(exc);
-				}
-				try {
-					MethodHandles.Lookup classLoaderConsulter = lowLevelObjectsHandler.getConsulter(ClassLoader.class);
-					MethodType methodType = MethodType.methodType(Package.class, String.class);
-					MethodHandle methodHandle = classLoaderConsulter.findSpecial(ClassLoader.class, "getDefinedPackage", methodType, ClassLoader.class);
-					lowLevelObjectsHandler.packageRetriever = (classLoader, object, packageName) ->
-						(Package)methodHandle.invokeExact(classLoader, packageName);
-				} catch (Throwable exc) {
-					Throwables.throwException(exc);
-				}
-				try {
-					lowLevelObjectsHandler.builtinClassLoaderClass = Class.forName("jdk.internal.loader.BuiltinClassLoader");
-					try {
-						lowLevelObjectsHandler.methodInvoker = Class.forName(
-							"jdk.internal.reflect.NativeMethodAccessorImpl"
-						).getDeclaredMethod(
-							"invoke0", Method.class, Object.class, Object[].class
-						);
-						lowLevelObjectsHandler.setAccessible(lowLevelObjectsHandler.methodInvoker, true);
-					} catch (Throwable exc) {
-						logInfo("method invoke0 of class jdk.internal.reflect.NativeMethodAccessorImpl not detected");
-						Throwables.throwException(exc);
-					}
-					try (
-						InputStream inputStream =
-							Resources.getAsInputStream(this.getClass().getClassLoader(), "org/burningwave/core/classes/ClassLoaderDelegate.bwc"
-						);
-						ByteBufferOutputStream bBOS = new ByteBufferOutputStream()
-					) {
-						Streams.copy(inputStream, bBOS);
-						lowLevelObjectsHandler.classLoaderDelegateClass = lowLevelObjectsHandler.unsafe.defineAnonymousClass(
-							lowLevelObjectsHandler.builtinClassLoaderClass, bBOS.toByteArray(), null
-						);
-					} catch (Throwable exc) {
-						Throwables.throwException(exc);
-					}
-				} catch (Throwable exc) {
-					logInfo("jdk.internal.loader.BuiltinClassLoader class not detected");
-					Throwables.throwException(exc);
-				}
-				try {
-					initDeepConsulter();
-				} catch (IllegalAccessException | NoSuchMethodException | InstantiationException
-						| InvocationTargetException | ClassNotFoundException exc) {
-					logInfo("Could not init deep consulter");
-					Throwables.throwException(exc);
-				}
-			}
-
-
-			void initDeepConsulter() throws IllegalAccessException,
-					NoSuchMethodException, InstantiationException, InvocationTargetException, ClassNotFoundException {
-				Constructor<MethodHandles.Lookup> lookupCtor = lowLevelObjectsHandler.getDeclaredConstructor(
-					MethodHandles.Lookup.class, ctor -> 
-						ctor.getParameters().length == 2 && 
-						ctor.getParameters()[0].getType().equals(Class.class) &&
-						ctor.getParameters()[1].getType().equals(int.class)
-				);
-				lowLevelObjectsHandler.setAccessible(lookupCtor, true);
-				Field fullPowerModeConstant = lowLevelObjectsHandler.getDeclaredField(MethodHandles.Lookup.class, field -> "FULL_POWER_MODES".equals(field.getName()));
-				lowLevelObjectsHandler.setAccessible(fullPowerModeConstant, true);
-				int fullPowerModeConstantValue = fullPowerModeConstant.getInt(null);
-				MethodHandle mthHandle = lookupCtor.newInstance(MethodHandles.Lookup.class, fullPowerModeConstantValue).findConstructor(
-					MethodHandles.Lookup.class, MethodType.methodType(void.class, Class.class, int.class)
-				);
-				lowLevelObjectsHandler.consulterRetriever = cls ->
-					(MethodHandles.Lookup)mthHandle.invoke(cls, fullPowerModeConstantValue);
-			}
-			
-			@Override
-			public void close() {
-				super.close();
-			}
-		}
-		
-		private static class ForJava14 extends ForJava9 {
-			
-			ForJava14(LowLevelObjectsHandler lowLevelObjectsHandler) {
-				super(lowLevelObjectsHandler);
-			}
-			
-			@Override
-			void initDeepConsulter() throws IllegalAccessException, NoSuchMethodException, InstantiationException,
-					InvocationTargetException, ClassNotFoundException {
-				Constructor<?> lookupCtor = lowLevelObjectsHandler.getDeclaredConstructor(
-					MethodHandles.Lookup.class, ctor -> 
-						ctor.getParameters().length == 3 && 
-						ctor.getParameters()[0].getType().equals(Class.class) &&
-						ctor.getParameters()[1].getType().equals(Class.class) &&
-						ctor.getParameters()[2].getType().equals(int.class)
-				);
-				lowLevelObjectsHandler.setAccessible(lookupCtor, true);
-				Field fullPowerModeConstant = lowLevelObjectsHandler.getDeclaredField(MethodHandles.Lookup.class, field -> "FULL_POWER_MODES".equals(field.getName()));
-				lowLevelObjectsHandler.setAccessible(fullPowerModeConstant, true);
-				int fullPowerModeConstantValue = fullPowerModeConstant.getInt(null);
-				MethodHandle mthHandle = ((MethodHandles.Lookup)lookupCtor.newInstance(MethodHandles.Lookup.class, null, fullPowerModeConstantValue)).findConstructor(
-					MethodHandles.Lookup.class, MethodType.methodType(void.class, Class.class, Class.class, int.class)
-				);
-				lowLevelObjectsHandler.consulterRetriever = cls ->
-					(MethodHandles.Lookup)mthHandle.invoke(cls, null, fullPowerModeConstantValue);
-			}
-		}
-		
 	}
 }
